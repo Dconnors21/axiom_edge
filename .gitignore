@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+
+# Databases (seeded at runtime — don't commit live data)
+*.db
+*.db-shm
+*.db-wal
+
+# Logs and archives
+logs/
+_archive/
+
+# Secrets / local config overrides
+.env
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+*.bat
