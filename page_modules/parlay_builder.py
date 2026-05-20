@@ -338,22 +338,24 @@ def render():
     st.markdown("<div class='sh'>Leg analysis</div>", unsafe_allow_html=True)
 
     analyzed = []
-    for leg_idx, leg_type in legs:
-        leg_cols = st.columns(2)
-        with leg_cols[leg_idx % 2]:
-            st.markdown(
-                f"<div style='font-size:11px;color:#4f8ef7;font-weight:600;margin-bottom:4px'>LEG {leg_idx+1} · {leg_type}</div>",
-                unsafe_allow_html=True
-            )
-            if "Moneyline" in leg_type:
-                result = _render_ml_leg(leg_idx, games_df)
-            elif "Spread" in leg_type:
-                result = _render_spread_leg(leg_idx, spreads_df)
-            else:
-                result = _render_prop_leg(leg_idx, player_list, window)
+    leg_pairs = [legs[i:i+2] for i in range(0, len(legs), 2)]
+    for pair in leg_pairs:
+        pair_cols = st.columns(2)
+        for col_idx, (leg_idx, leg_type) in enumerate(pair):
+            with pair_cols[col_idx]:
+                st.markdown(
+                    f"<div style='font-size:11px;color:#4f8ef7;font-weight:600;margin-bottom:4px'>LEG {leg_idx+1} · {leg_type}</div>",
+                    unsafe_allow_html=True
+                )
+                if "Moneyline" in leg_type:
+                    result = _render_ml_leg(leg_idx, games_df)
+                elif "Spread" in leg_type:
+                    result = _render_spread_leg(leg_idx, spreads_df)
+                else:
+                    result = _render_prop_leg(leg_idx, player_list, window)
 
-            if result:
-                analyzed.append(result)
+                if result:
+                    analyzed.append(result)
 
     if len(analyzed) >= 2:
         st.markdown("<div class='sh'>Parlay summary</div>", unsafe_allow_html=True)

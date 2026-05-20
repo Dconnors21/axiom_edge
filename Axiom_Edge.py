@@ -265,6 +265,7 @@ with st.sidebar:
     st.markdown('<div class="nav-section">⚾ MLB</div>', unsafe_allow_html=True)
     _nav("MLB Picks", "mlb_picks")
     _nav("ROI Tracker", "mlb_roi")
+    _nav("Pitcher Research", "mlb_player")
 
     # ── Coming soon ──
     st.markdown("""
@@ -318,11 +319,17 @@ if page == "home":
     st.markdown("<div class='sh'>Today's best bets by sport</div>", unsafe_allow_html=True)
 
     # NBA card
-    nba_preds  = load(NBA_DB, "SELECT * FROM predictions WHERE predict_date=? ORDER BY commence_time", params=(today,))
-    nba_best   = get_best_bet(nba_preds) if not nba_preds.empty else None
-    nba_val    = int(((nba_preds["home_value"] == 1) | (nba_preds["away_value"] == 1)).sum()) if not nba_preds.empty else 0
-    nba_spread = load(NBA_DB, "SELECT * FROM spread_predictions WHERE predict_date=? ORDER BY commence_time", params=(today,))
-    nba_ats    = get_best_ats(nba_spread) if not nba_spread.empty else None
+    nba_preds   = load(NBA_DB, "SELECT * FROM predictions WHERE predict_date=? ORDER BY commence_time", params=(today,))
+    nba_best    = get_best_bet(nba_preds) if not nba_preds.empty else None
+    nba_spread  = load(NBA_DB, "SELECT * FROM spread_predictions WHERE predict_date=? ORDER BY commence_time", params=(today,))
+    nba_ats     = get_best_ats(nba_spread) if not nba_spread.empty else None
+    nba_totals  = load(NBA_DB, "SELECT * FROM totals_predictions WHERE predict_date=?", params=(today,))
+    nba_props   = load(NBA_DB, "SELECT * FROM props_predictions WHERE predict_date=?", params=(today,))
+    nba_ml_val  = int(((nba_preds["home_value"]==1)|(nba_preds["away_value"]==1)).sum()) if not nba_preds.empty else 0
+    nba_ats_val = int(((nba_spread["home_ats_value"]==1)|(nba_spread["away_ats_value"]==1)).sum()) if not nba_spread.empty else 0
+    nba_tot_val = int(((nba_totals["over_value"]==1)|(nba_totals["under_value"]==1)).sum()) if not nba_totals.empty else 0
+    nba_prp_val = int(((nba_props["over_value"]==1)|(nba_props["under_value"]==1)).sum()) if not nba_props.empty else 0
+    nba_val_str = f"{nba_ml_val} ML · {nba_ats_val} ATS · {nba_tot_val} O/U · {nba_prp_val} Props"
 
     if nba_best:
         tip = fmt_tip(nba_best.get("commence_time", ""))
@@ -356,7 +363,7 @@ if page == "home":
     <div style="display:flex;align-items:center;gap:12px">
       <span style="font-size:28px">🏀</span>
       <div><div class="sport-name">NBA</div>
-      <div style="font-size:12px;color:#6b6b78">{len(nba_preds)} games · {nba_val} value bets</div></div>
+      <div style="font-size:12px;color:#6b6b78">{len(nba_preds)} games · {nba_val_str}</div></div>
     </div>
     <div class="sport-status-live">● LIVE</div>
   </div>
@@ -365,9 +372,14 @@ if page == "home":
 """, unsafe_allow_html=True)
 
     # MLB card
-    mlb_preds = load(MLB_DB, "SELECT * FROM mlb_predictions WHERE predict_date=? ORDER BY commence_time", params=(today,))
-    mlb_best  = get_best_bet(mlb_preds) if not mlb_preds.empty else None
-    mlb_val   = int(((mlb_preds["home_value"] == 1) | (mlb_preds["away_value"] == 1)).sum()) if not mlb_preds.empty else 0
+    mlb_preds    = load(MLB_DB, "SELECT * FROM mlb_predictions WHERE predict_date=? ORDER BY commence_time", params=(today,))
+    mlb_best     = get_best_bet(mlb_preds) if not mlb_preds.empty else None
+    mlb_spread_p = load(MLB_DB, "SELECT * FROM mlb_spread_predictions WHERE predict_date=?", params=(today,))
+    mlb_totals_p = load(MLB_DB, "SELECT * FROM mlb_totals_predictions WHERE predict_date=?", params=(today,))
+    mlb_ml_val   = int(((mlb_preds["home_value"]==1)|(mlb_preds["away_value"]==1)).sum()) if not mlb_preds.empty else 0
+    mlb_ats_val  = int(((mlb_spread_p["home_ats_value"]==1)|(mlb_spread_p["away_ats_value"]==1)).sum()) if not mlb_spread_p.empty else 0
+    mlb_tot_val  = int(((mlb_totals_p["over_value"]==1)|(mlb_totals_p["under_value"]==1)).sum()) if not mlb_totals_p.empty else 0
+    mlb_val_str  = f"{mlb_ml_val} ML · {mlb_ats_val} ATS · {mlb_tot_val} O/U"
 
     if mlb_best:
         tip = fmt_tip(mlb_best.get("commence_time", ""))
@@ -388,7 +400,7 @@ if page == "home":
     <div style="display:flex;align-items:center;gap:12px">
       <span style="font-size:28px">⚾</span>
       <div><div class="sport-name">MLB</div>
-      <div style="font-size:12px;color:#6b6b78">{len(mlb_preds)} games · {mlb_val} value bets</div></div>
+      <div style="font-size:12px;color:#6b6b78">{len(mlb_preds)} games · {mlb_val_str}</div></div>
     </div>
     <div class="sport-status-live">● LIVE</div>
   </div>
@@ -452,3 +464,7 @@ elif page == "mlb_picks":
 elif page == "mlb_roi":
     from page_modules.mlb_roi import render as render_roi
     render_roi()
+
+elif page == "mlb_player":
+    from page_modules.mlb_player_research import render as render_mlb_player
+    render_mlb_player()

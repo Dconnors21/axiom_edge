@@ -645,6 +645,80 @@ def _seed_mlb(conn):
         "INSERT OR IGNORE INTO mlb_predictions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         mlb_pred_rows
     )
+    # ── Pitcher logs ──────────────────────────────────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS mlb_pitcher_logs (
+            game_id TEXT, game_date TEXT, season TEXT, team TEXT,
+            pitcher_name TEXT, is_starter INTEGER,
+            ip REAL, er INTEGER, h INTEGER, bb INTEGER, k INTEGER,
+            era REAL, whip REAL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pitcher_season_stats (
+            season TEXT, pitcher_name TEXT, team TEXT,
+            era REAL, whip REAL, fip REAL, ip REAL,
+            k_per_9 REAL, bb_per_9 REAL
+        )
+    """)
+
+    PITCHER_PROFILES = [
+        # (name, team, avg_k, avg_ip, avg_er, avg_h, avg_bb, era, whip, k9)
+        ("Gerrit Cole",       "NYY", 9.2, 6.1, 2.1, 5.2, 1.8, 3.20, 1.04, 11.1),
+        ("Shane Bieber",      "BOS", 7.8, 5.9, 2.4, 5.8, 1.6, 3.65, 1.12, 9.8),
+        ("Clayton Kershaw",   "LAD", 7.5, 5.5, 2.3, 5.5, 1.7, 3.45, 1.10, 9.3),
+        ("Freddie Peralta",   "MIL", 8.4, 5.4, 2.6, 5.0, 2.2, 3.90, 1.18, 10.2),
+        ("Spencer Strider",   "ATL", 10.1, 5.8, 2.5, 4.8, 2.0, 3.55, 1.07, 12.3),
+        ("Justin Verlander",  "HOU", 7.2, 6.0, 2.8, 6.1, 1.5, 3.80, 1.15, 9.0),
+        ("Max Scherzer",      "TEX", 8.8, 5.7, 2.7, 5.3, 1.9, 3.70, 1.09, 10.8),
+        ("Blake Snell",       "SDP", 9.5, 5.2, 2.9, 4.6, 2.8, 4.10, 1.25, 11.5),
+        ("Zack Wheeler",      "PHI", 8.0, 6.2, 2.4, 5.6, 1.8, 3.30, 1.06, 9.6),
+        ("Logan Webb",        "SFG", 6.8, 6.3, 2.2, 6.0, 1.4, 3.15, 1.02, 8.4),
+    ]
+
+    pitcher_log_rows = []
+    pitcher_season_rows = []
+    for pname, team, avg_k, avg_ip, avg_er, avg_h, avg_bb, era, whip, k9 in PITCHER_PROFILES:
+        # Season stats
+        pitcher_season_rows.append((
+            "2025", pname, team,
+            round(era, 2), round(whip, 2),
+            round(era - 0.3 + np.random.normal(0, 0.1), 2),
+            round(avg_ip * 20, 1),
+            round(k9, 1),
+            round(avg_bb / avg_ip * 9, 1),
+        ))
+        # Game logs (25 starts)
+        for g in range(25):
+            gdate = today - timedelta(days=25 - g) * 4
+            gid   = f"{gdate.strftime('%Y%m%d')}_{team}_P{g}"
+            ip    = max(1.0, np.random.normal(avg_ip, 1.2))
+            ip    = round(min(ip, 9.0) * 3) / 3  # round to 1/3 inning
+            k     = max(0, int(np.random.normal(avg_k, 2.5)))
+            er    = max(0, int(np.random.normal(avg_er, 1.5)))
+            h     = max(0, int(np.random.normal(avg_h, 2.0)))
+            bb    = max(0, int(np.random.normal(avg_bb, 1.0)))
+            g_era = round((er / ip * 9) if ip > 0 else era, 2)
+            g_whip = round(((bb + h) / ip) if ip > 0 else whip, 2)
+            pitcher_log_rows.append((
+                gid, gdate.isoformat(), "2025", team,
+                pname, 1,
+                round(ip, 1), er, h, bb, k,
+                g_era, g_whip,
+            ))
+
+    conn.executemany("""
+        INSERT OR IGNORE INTO mlb_pitcher_logs
+        (game_id, game_date, season, team, pitcher_name, is_starter,
+         ip, er, h, bb, k, era, whip)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, pitcher_log_rows)
+    conn.executemany("""
+        INSERT OR IGNORE INTO pitcher_season_stats
+        (season, pitcher_name, team, era, whip, fip, ip, k_per_9, bb_per_9)
+        VALUES (?,?,?,?,?,?,?,?,?)
+    """, pitcher_season_rows)
+
     conn.commit()
 
 
@@ -662,7 +736,7 @@ def seed_if_empty():
             conn.close()
 
     # MLB
-    if not _is_seeded(MLB_DB, "mlb_bet_log", min_rows=10):
+    if not _is_seeded(MLB_DB, "mlb_bet_log", min_rows=5) or not _is_seeded(MLB_DB, "mlb_pitcher_logs", min_rows=10):
         conn = sqlite3.connect(MLB_DB)
         try:
             _seed_mlb(conn)

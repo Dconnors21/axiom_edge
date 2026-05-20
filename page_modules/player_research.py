@@ -62,33 +62,51 @@ def render():
     st.markdown(_CSS, unsafe_allow_html=True)
     st.markdown("<div class='sh'>Player research</div>", unsafe_allow_html=True)
 
-    players_df = _load("SELECT DISTINCT player_name FROM player_stats ORDER BY player_name")
-    if players_df.empty:
-        st.warning("No player data. Run `python props.py` first.")
+    all_players_df = _load("SELECT DISTINCT player_name FROM player_game_logs ORDER BY player_name")
+    if all_players_df.empty:
+        st.warning("No player data. Run `python collect_props.py` first.")
         return
 
-    teams_df     = _load("SELECT DISTINCT team_name FROM games WHERE team_name IS NOT NULL ORDER BY team_name")
-    team_options = ["All opponents"] + (teams_df["team_name"].tolist() if not teams_df.empty else [])
+    all_players = all_players_df["player_name"].tolist()
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1: selected_player = st.selectbox("Player", players_df["player_name"].tolist())
-    with c2: opp_team = st.selectbox("vs Opponent", team_options)
-    with c3: prop_stat = st.selectbox("Stat", list(STAT_LABELS.keys()), format_func=lambda x: STAT_LABELS[x])
-    with c4: prop_line = st.number_input("Line", min_value=0.0, max_value=80.0, value=20.0, step=0.5)
-    with c5: prop_window = st.selectbox("Last N games", [5, 10, 15, 20], index=1)
+    # ── Filter controls ──────────────────────────────────────────────────────
+    fc1, fc2, fc3, fc4, fc5 = st.columns([2, 2, 1, 1, 1])
+    with fc1:
+        st.caption("Search player")
+        search = st.text_input("Search player", placeholder="Type name to filter…",
+                               label_visibility="collapsed",
+                               key="player_search")
+    filtered = [p for p in all_players if search.lower() in p.lower()] if search else all_players
+    with fc2:
+        st.caption("Player")
+        if not filtered:
+            st.caption("No players match that search.")
+            return
+        selected_player = st.selectbox("Player", filtered, label_visibility="collapsed")
+    with fc3:
+        st.caption("Stat")
+        prop_stat = st.selectbox("Stat", list(STAT_LABELS.keys()),
+                                 format_func=lambda x: STAT_LABELS[x],
+                                 label_visibility="collapsed")
+    with fc4:
+        st.caption("Line")
+        prop_line = st.number_input("Line", min_value=0.0, max_value=80.0,
+                                    value=20.0, step=0.5, label_visibility="collapsed")
+    with fc5:
+        st.caption("Window")
+        prop_window = st.selectbox("Last N games", [5, 10, 15, 20], index=1,
+                                   label_visibility="collapsed")
 
-    opp_arg = opp_team if opp_team != "All opponents" else None
     df = _load("""
-        SELECT ps.*, g.matchup, g.wl, g.is_home, g.team_name, g.team_abbreviation
-        FROM player_stats ps
-        LEFT JOIN games g ON ps.game_id = g.game_id AND g.team_abbreviation = ps.team_abbrev
-        WHERE ps.player_name = ?
-        ORDER BY ps.game_date DESC
+        SELECT * FROM player_game_logs
+        WHERE player_name = ?
+        ORDER BY game_date DESC
     """, params=(selected_player,))
+
+    opp_arg = None
+    opp_team = "All opponents"
     if not df.empty:
         df["game_date"] = pd.to_datetime(df["game_date"])
-        if opp_arg:
-            df = df[df["matchup"].str.contains(opp_arg[:3].upper(), na=False, case=False)]
 
     if df.empty:
         st.markdown("""
@@ -103,7 +121,7 @@ def render():
 
     df_recent   = df.head(prop_window).copy()
     stat_series = df_recent[prop_stat].astype(float)
-    team        = df.iloc[0].get("team_name", "")
+    team        = df.iloc[0].get("team_abbreviation", "")
     latest      = df["game_date"].max().strftime("%b %d, %Y")
     gp          = len(df)
     avg         = stat_series.mean()
