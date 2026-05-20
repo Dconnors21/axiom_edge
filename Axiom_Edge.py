@@ -26,6 +26,7 @@ st.markdown("""
 [data-testid="stSidebarContent"]{padding-top:0}
 #MainMenu,footer,header{visibility:hidden}
 [data-testid="stToolbar"]{display:none}
+[data-testid="collapsedControl"]{display:flex!important;visibility:visible!important}
 .block-container{padding-top:0;padding-bottom:2rem;max-width:1200px}
 html,body,[class*="css"]{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e8e8ec}
 
