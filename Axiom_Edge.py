@@ -24,9 +24,12 @@ st.markdown("""
 .stApp{background-color:#0a0a0c}
 [data-testid="stSidebar"]{background-color:#0f0f12;border-right:1px solid #1e1e28}
 [data-testid="stSidebarContent"]{padding-top:0}
-#MainMenu,footer,header{visibility:hidden}
+#MainMenu,footer{visibility:hidden}
 [data-testid="stToolbar"]{display:none}
-[data-testid="collapsedControl"]{display:flex!important;visibility:visible!important}
+header{background:transparent!important}
+header svg, header a, header button:not([data-testid="baseButton-headerNoPadding"]){display:none!important}
+[data-testid="collapsedControl"]{display:flex!important;visibility:visible!important;opacity:1!important;z-index:999999!important}
+[data-testid="collapsedControl"] button{display:flex!important;visibility:visible!important}
 .block-container{padding-top:0;padding-bottom:2rem;max-width:1200px}
 html,body,[class*="css"]{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e8e8ec}
 
