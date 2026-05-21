@@ -725,6 +725,11 @@ def _seed_mlb(conn):
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def seed_if_empty():
+    # Only seed in demo/cloud mode — never on local machine
+    import os
+    if os.getenv("AXIOM_DEMO_MODE", "").lower() != "true":
+        return
+
     _rng()
 
     # NBA

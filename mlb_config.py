@@ -8,7 +8,7 @@ import os
 MLB_DB_PATH = os.path.join(os.path.dirname(__file__), "mlb.db")
 
 # ── Odds API ──────────────────────────────────────────────────────────────────
-ODDS_API_KEY  = os.getenv("ODDS_API_KEY", "")
+ODDS_API_KEY  = os.getenv("ODDS_API_KEY", "590ce3633c52e978993d60e6c1507b46")
 MLB_SPORT     = "baseball_mlb"
 SHARP_BOOKS   = ["pinnacle","draftkings","fanduel","betmgm","caesars"]
 
@@ -79,3 +79,4 @@ FEATURE_COLS = [
 ]
 
 TARGET = "home_win"
+

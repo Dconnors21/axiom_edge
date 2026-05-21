@@ -4,7 +4,7 @@
 
 # ── API Keys ──────────────────────────────────────────────────────────────────
 import os
-ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
+ODDS_API_KEY = os.getenv("ODDS_API_KEY", "590ce3633c52e978993d60e6c1507b46")
 
 # ── Database ──────────────────────────────────────────────────────────────────
 DB_PATH = "nba.db"
@@ -33,3 +33,4 @@ ODDS_FORMAT   = "american"
 # Pinnacle is the sharpest book — their line = market consensus
 # We use it as the benchmark for implied probability
 SHARP_BOOKS = ["pinnacle", "draftkings", "fanduel", "betmgm", "caesars"]
+
