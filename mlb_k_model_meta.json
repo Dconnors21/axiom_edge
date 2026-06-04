@@ -1,0 +1,19 @@
+{
+  "feature_cols": [
+    "k_last3",
+    "k_last5",
+    "k_last10",
+    "ip_last3",
+    "ip_last5",
+    "k_per9_last5",
+    "walks_last5",
+    "era_last5",
+    "is_home",
+    "days_rest",
+    "opp_k_pct_last10",
+    "season_k_avg"
+  ],
+  "sigma": 2.1365673972557153,
+  "market": "pitcher_strikeouts",
+  "trained_at": "2026-06-02T09:32:41.925312"
+}

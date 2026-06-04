@@ -1,0 +1,17 @@
+{
+  "feature_cols": [
+    "tb_last5",
+    "tb_last10",
+    "tb_last15",
+    "hr_last10",
+    "xbh_rate_last10",
+    "ab_last5",
+    "is_home",
+    "days_rest",
+    "season_tb_avg",
+    "opp_era_last5"
+  ],
+  "sigma": 1.7153105239494888,
+  "market": "batter_total_bases",
+  "trained_at": "2026-06-02T09:46:05.117503"
+}
