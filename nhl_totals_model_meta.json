@@ -1,0 +1,33 @@
+{
+  "feature_cols": [
+    "home_goals_scored_last5",
+    "home_goals_scored_last15",
+    "away_goals_scored_last5",
+    "away_goals_scored_last15",
+    "home_goals_allowed_last5",
+    "home_goals_allowed_last15",
+    "away_goals_allowed_last5",
+    "away_goals_allowed_last15",
+    "home_shots_last5",
+    "home_shots_last15",
+    "away_shots_last5",
+    "away_shots_last15",
+    "home_shots_against_last5",
+    "home_shots_against_last15",
+    "away_shots_against_last5",
+    "away_shots_against_last15",
+    "home_pp_pct_last10",
+    "away_pp_pct_last10",
+    "home_save_pct_last5",
+    "away_save_pct_last5",
+    "home_rest_days",
+    "away_rest_days",
+    "home_win_streak",
+    "away_win_streak",
+    "home_advantage"
+  ],
+  "target": "total_goals",
+  "rmse": 2.373627818389638,
+  "skill": 0.0,
+  "trained_at": "2026-06-02T13:09:28.033161"
+}
