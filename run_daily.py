@@ -259,9 +259,28 @@ def morning_pipeline():
     return True
 
 
+def _unresolved_dates(db, table, null_col, date_col="predict_date", lookback_days=14):
+    """Distinct predict_dates within the lookback window that still have unresolved
+    rows (null_col IS NULL). Lets the evening sweep catch games that were missed on
+    prior runs (postponements, skipped evenings) rather than only today/yesterday."""
+    cutoff = (date.today() - timedelta(days=lookback_days)).isoformat()
+    try:
+        conn = sqlite3.connect(db)
+        try:
+            rows = conn.execute(
+                f"SELECT DISTINCT {date_col} FROM {table} "
+                f"WHERE {null_col} IS NULL AND {date_col} >= ? ORDER BY {date_col}",
+                (cutoff,)
+            ).fetchall()
+        finally:
+            conn.close()
+        return [r[0] for r in rows if r[0]]
+    except Exception:
+        return []
+
+
 def evening_pipeline():
-    today     = date.today().isoformat()
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    today = date.today().isoformat()
     if _already_ran_today("evening"):
         log(f"Evening pipeline already ran today ({today}) — skipping.")
         return
@@ -271,115 +290,76 @@ def evening_pipeline():
 
     # ── NBA results ───────────────────────────────────────────────────────────
     log("─── NBA results ────────────────────────────────────────────")
-    conn = sqlite3.connect("nba.db")
-    tp = conn.execute(
-        "SELECT COUNT(*) FROM predictions WHERE predict_date=? AND actual_home_win IS NULL",
-        (today,)
-    ).fetchone()[0]
-    yp = conn.execute(
-        "SELECT COUNT(*) FROM predictions WHERE predict_date=? AND actual_home_win IS NULL",
-        (yesterday,)
-    ).fetchone()[0]
-    conn.close()
-
-    nba_target = today if tp > 0 else (yesterday if yp > 0 else None)
-    if nba_target:
-        log(f"Fetching NBA results for {nba_target}...")
-        subprocess.run(
-            [sys.executable, "results_fetcher.py", "--date", nba_target],
-            cwd=str(Path(__file__).parent)
-        )
-        # Pull player logs for that date, then resolve props (all stats)
-        log(f"Resolving player props for {nba_target}...")
-        subprocess.run(
-            [sys.executable, "collect_props.py", "--date", nba_target],
-            cwd=str(Path(__file__).parent)
-        )
-        subprocess.run(
-            [sys.executable, "props_results_fetcher.py", "--date", nba_target, "--stat", "all"],
-            cwd=str(Path(__file__).parent)
-        )
+    nba_dates = _unresolved_dates("nba.db", "predictions", "actual_home_win")
+    if nba_dates:
+        log(f"Sweeping {len(nba_dates)} unresolved NBA date(s): {', '.join(nba_dates)}")
+        for d in nba_dates:
+            log(f"Fetching NBA results for {d}...")
+            subprocess.run(
+                [sys.executable, "results_fetcher.py", "--date", d],
+                cwd=str(Path(__file__).parent)
+            )
+            # Pull player logs for that date, then resolve props (all stats)
+            log(f"Resolving player props for {d}...")
+            subprocess.run(
+                [sys.executable, "collect_props.py", "--date", d],
+                cwd=str(Path(__file__).parent)
+            )
+            subprocess.run(
+                [sys.executable, "props_results_fetcher.py", "--date", d, "--stat", "all"],
+                cwd=str(Path(__file__).parent)
+            )
     else:
-        log("No unresolved NBA predictions found")
+        log("No unresolved NBA predictions found (last 14 days)")
 
     # ── MLB results ───────────────────────────────────────────────────────────
     log("─── MLB results ────────────────────────────────────────────")
     try:
-        mlb_conn = sqlite3.connect("mlb.db")
-        mlb_tp = mlb_conn.execute(
-            "SELECT COUNT(*) FROM mlb_predictions WHERE predict_date=? AND actual_home_win IS NULL",
-            (today,)
-        ).fetchone()[0]
-        mlb_yp = mlb_conn.execute(
-            "SELECT COUNT(*) FROM mlb_predictions WHERE predict_date=? AND actual_home_win IS NULL",
-            (yesterday,)
-        ).fetchone()[0]
-        mlb_conn.close()
-
-        mlb_target = today if mlb_tp > 0 else (yesterday if mlb_yp > 0 else None)
-        if mlb_target:
-            log(f"Fetching MLB results for {mlb_target}...")
-            subprocess.run(
-                [sys.executable, "mlb_results_fetcher.py", "--date", mlb_target],
-                cwd=str(Path(__file__).parent)
-            )
+        mlb_dates = _unresolved_dates("mlb.db", "mlb_predictions", "actual_home_win")
+        if mlb_dates:
+            log(f"Sweeping {len(mlb_dates)} unresolved MLB date(s): {', '.join(mlb_dates)}")
+            for d in mlb_dates:
+                log(f"Fetching MLB results for {d}...")
+                subprocess.run(
+                    [sys.executable, "mlb_results_fetcher.py", "--date", d],
+                    cwd=str(Path(__file__).parent)
+                )
         else:
-            log("No unresolved MLB predictions found")
+            log("No unresolved MLB predictions found (last 14 days)")
     except Exception as e:
         log(f"MLB results check failed: {e}")
 
     # ── MLB Props results ─────────────────────────────────────────────────────
     log("─── MLB props results ──────────────────────────────────────")
     try:
-        mlb_props_conn = sqlite3.connect("mlb.db")
-        try:
-            mlb_props_tp = mlb_props_conn.execute(
-                "SELECT COUNT(*) FROM mlb_props_predictions_k WHERE predict_date=? AND actual_val IS NULL",
-                (today,)
-            ).fetchone()[0]
-            mlb_props_yp = mlb_props_conn.execute(
-                "SELECT COUNT(*) FROM mlb_props_predictions_k WHERE predict_date=? AND actual_val IS NULL",
-                (yesterday,)
-            ).fetchone()[0]
-        except Exception:
-            mlb_props_tp = mlb_props_yp = 0
-        mlb_props_conn.close()
-
-        mlb_props_target = today if mlb_props_tp > 0 else (yesterday if mlb_props_yp > 0 else None)
-        if mlb_props_target:
-            log(f"Fetching MLB prop results for {mlb_props_target}...")
-            subprocess.run(
-                [sys.executable, "mlb_props_results_fetcher.py", "--date", mlb_props_target],
-                cwd=str(Path(__file__).parent)
-            )
+        mlb_props_dates = _unresolved_dates("mlb.db", "mlb_props_predictions_k", "actual_val")
+        if mlb_props_dates:
+            log(f"Sweeping {len(mlb_props_dates)} unresolved MLB prop date(s): {', '.join(mlb_props_dates)}")
+            for d in mlb_props_dates:
+                log(f"Fetching MLB prop results for {d}...")
+                subprocess.run(
+                    [sys.executable, "mlb_props_results_fetcher.py", "--date", d],
+                    cwd=str(Path(__file__).parent)
+                )
         else:
-            log("No unresolved MLB prop predictions found")
+            log("No unresolved MLB prop predictions found (last 14 days)")
     except Exception as e:
         log(f"MLB props results check failed: {e}")
 
     # ── NHL results ───────────────────────────────────────────────────────────
     log("─── NHL results ────────────────────────────────────────────")
     try:
-        nhl_conn = sqlite3.connect("nhl.db")
-        nhl_tp = nhl_conn.execute(
-            "SELECT COUNT(*) FROM nhl_predictions WHERE predict_date=? AND actual_home_win IS NULL",
-            (today,)
-        ).fetchone()[0]
-        nhl_yp = nhl_conn.execute(
-            "SELECT COUNT(*) FROM nhl_predictions WHERE predict_date=? AND actual_home_win IS NULL",
-            (yesterday,)
-        ).fetchone()[0]
-        nhl_conn.close()
-
-        nhl_target = today if nhl_tp > 0 else (yesterday if nhl_yp > 0 else None)
-        if nhl_target:
-            log(f"Fetching NHL results for {nhl_target}...")
-            subprocess.run(
-                [sys.executable, "nhl_results_fetcher.py", "--date", nhl_target],
-                cwd=str(Path(__file__).parent)
-            )
+        nhl_dates = _unresolved_dates("nhl.db", "nhl_predictions", "actual_home_win")
+        if nhl_dates:
+            log(f"Sweeping {len(nhl_dates)} unresolved NHL date(s): {', '.join(nhl_dates)}")
+            for d in nhl_dates:
+                log(f"Fetching NHL results for {d}...")
+                subprocess.run(
+                    [sys.executable, "nhl_results_fetcher.py", "--date", d],
+                    cwd=str(Path(__file__).parent)
+                )
         else:
-            log("No unresolved NHL predictions found")
+            log("No unresolved NHL predictions found (last 14 days)")
     except Exception as e:
         log(f"NHL results check failed: {e}")
 
@@ -395,7 +375,7 @@ def afternoon_pipeline():
     log(f"AXIOM EDGE — AFTERNOON PIPELINE — {today}")
     log("=" * 60)
     log("Fetching closing odds for CLV tracking (~4 PM)...")
-    run("fetch_closing_odds.py", "Closing odds fetch (NBA + MLB)")
+    run("fetch_closing_odds.py", "Closing odds fetch (NBA + MLB + NHL)")
     log("=" * 60)
     log("Afternoon pipeline complete — closing lines captured")
     log("=" * 60)

@@ -33,7 +33,8 @@ def init_bet_logs(conn):
             kelly         REAL,
             units         REAL,
             won           INTEGER,
-            pnl           REAL
+            pnl           REAL,
+            clv           REAL
         )
     """)
     # Puck line bet log
@@ -52,7 +53,8 @@ def init_bet_logs(conn):
             kelly         REAL,
             units         REAL,
             won           INTEGER,
-            pnl           REAL
+            pnl           REAL,
+            clv           REAL
         )
     """)
     # Totals bet log
@@ -71,10 +73,35 @@ def init_bet_logs(conn):
             kelly         REAL,
             units         REAL,
             won           INTEGER,
-            pnl           REAL
+            pnl           REAL,
+            clv           REAL
         )
     """)
+    # Migrate older DBs created before the clv column existed.
+    for tbl in ("nhl_bet_log", "nhl_ats_bet_log", "nhl_totals_bet_log"):
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
+        if "clv" not in cols:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN clv REAL")
     conn.commit()
+
+
+def _clv(conn, game_id: str, market: str, side: str, open_fair) -> float | None:
+    """CLV = closing vig-free prob - opening vig-free prob (positive = beat the close).
+    Closing probs are written by fetch_closing_odds.py into nhl_closing_odds, keyed
+    by the same Odds-API game_id used in the nhl_*_predictions tables."""
+    if open_fair is None or pd.isna(open_fair):
+        return None
+    try:
+        row = conn.execute(
+            "SELECT close_fair_prob FROM nhl_closing_odds "
+            "WHERE game_id=? AND market=? AND side=?",
+            (game_id, market, side),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None  # nhl_closing_odds not created yet (closing fetch never ran)
+    if not row or row[0] is None:
+        return None
+    return float(row[0]) - float(open_fair)
 
 # ── Fetch scores from NHL API ─────────────────────────────────────────────────
 
@@ -163,9 +190,9 @@ def resolve_ml(target_date: str, games: list, conn):
         )
 
         # Log any value bets
-        for side, val_col, odds_col, kelly_col, edge_col, abbrev in [
-            ("home", "home_value", "home_price", "home_kelly", "home_edge", pred["home_team"]),
-            ("away", "away_value", "away_price", "away_kelly", "away_edge", pred["away_team"]),
+        for side, val_col, odds_col, kelly_col, edge_col, fair_col, abbrev in [
+            ("home", "home_value", "home_price", "home_kelly", "home_edge", "home_fair_prob", pred["home_team"]),
+            ("away", "away_value", "away_price", "away_kelly", "away_edge", "away_fair_prob", pred["away_team"]),
         ]:
             if not pred.get(val_col, 0):
                 continue
@@ -174,14 +201,15 @@ def resolve_ml(target_date: str, games: list, conn):
             k     = max(0.01, float(pred.get(kelly_col, 0.01)))
             units = round(k, 3)
             pnl   = round(units * american_to_pnl(odds, won), 4)
+            clv   = _clv(conn, gid, "h2h", side, pred.get(fair_col))
             conn.execute("""
                 INSERT INTO nhl_bet_log
                 (game_id, game_date, home_team, away_team, bet_team, bet_side,
-                 odds, edge, kelly, units, won, pnl)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                 odds, edge, kelly, units, won, pnl, clv)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (gid, target_date, pred["home_team"], pred["away_team"],
                   abbrev, side, odds, pred.get(edge_col, 0), k, units,
-                  int(won), pnl))
+                  int(won), pnl, clv))
         resolved += 1
 
     conn.commit()
@@ -214,9 +242,9 @@ def resolve_spread(target_date: str, games: list, conn):
             (home_covered, gid, target_date)
         )
 
-        for side, val_col, odds_col, kelly_col, edge_col in [
-            ("home", "home_value", "home_price", "home_kelly", "home_edge"),
-            ("away", "away_value", "away_price", "away_kelly", "away_edge"),
+        for side, val_col, odds_col, kelly_col, edge_col, fair_col in [
+            ("home", "home_value", "home_price", "home_kelly", "home_edge", "home_fair_prob"),
+            ("away", "away_value", "away_price", "away_kelly", "away_edge", "away_fair_prob"),
         ]:
             if not pred.get(val_col, 0):
                 continue
@@ -225,15 +253,16 @@ def resolve_spread(target_date: str, games: list, conn):
             k     = max(0.01, float(pred.get(kelly_col, 0.01)))
             units = round(k, 3)
             pnl   = round(units * american_to_pnl(odds, won), 4)
+            clv   = _clv(conn, gid, "spreads", side, pred.get(fair_col))
             spread = pred.get("home_point", -1.5) if side == "home" else pred.get("away_point", 1.5)
             conn.execute("""
                 INSERT INTO nhl_ats_bet_log
                 (game_id, game_date, home_team, away_team, bet_team, bet_side,
-                 spread, odds, edge, kelly, units, won, pnl)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 spread, odds, edge, kelly, units, won, pnl, clv)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (gid, target_date, pred["home_team"], pred["away_team"],
                   pred["home_team"] if side == "home" else pred["away_team"], side,
-                  spread, odds, pred.get(edge_col, 0), k, units, int(won), pnl))
+                  spread, odds, pred.get(edge_col, 0), k, units, int(won), pnl, clv))
         resolved += 1
 
     conn.commit()
@@ -267,9 +296,9 @@ def resolve_totals(target_date: str, games: list, conn):
             (actual_total, gid, target_date)
         )
 
-        for side, val_col, odds_col, kelly_col, edge_col in [
-            ("over",  "over_value",  "over_price",  "over_kelly",  "over_edge"),
-            ("under", "under_value", "under_price", "under_kelly", "under_edge"),
+        for side, val_col, odds_col, kelly_col, edge_col, fair_col in [
+            ("over",  "over_value",  "over_price",  "over_kelly",  "over_edge",  "over_fair_prob"),
+            ("under", "under_value", "under_price", "under_kelly", "under_edge", "under_fair_prob"),
         ]:
             if not pred.get(val_col, 0):
                 continue
@@ -278,14 +307,15 @@ def resolve_totals(target_date: str, games: list, conn):
             k     = max(0.01, float(pred.get(kelly_col, 0.01)))
             units = round(k, 3)
             pnl   = round(units * american_to_pnl(odds, won), 4)
+            clv   = _clv(conn, gid, "totals", side, pred.get(fair_col))
             conn.execute("""
                 INSERT INTO nhl_totals_bet_log
                 (game_id, game_date, home_team, away_team, bet_side, line,
-                 pred_total, odds, edge, kelly, units, won, pnl)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 pred_total, odds, edge, kelly, units, won, pnl, clv)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (gid, target_date, pred["home_team"], pred["away_team"],
                   side, book_line, pred.get("pred_total"), odds,
-                  pred.get(edge_col, 0), k, units, int(won), pnl))
+                  pred.get(edge_col, 0), k, units, int(won), pnl, clv))
         resolved += 1
 
     conn.commit()

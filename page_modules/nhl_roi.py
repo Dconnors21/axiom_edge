@@ -134,8 +134,8 @@ def _edge_dist_chart(bets: pd.DataFrame, color: str):
         marker_color=color,
         hovertemplate="%{x}<br>Win rate %{y:.1f}%<extra></extra>",
     ))
-    fig.update_layout(**_CHART, height=200, showlegend=False,
-                      yaxis=dict(**_CHART["yaxis"], ticksuffix="%"))
+    fig.update_layout(**{**_CHART, "height": 200, "showlegend": False,
+                         "yaxis": {**_CHART["yaxis"], "ticksuffix": "%"}})
     return fig
 
 def _bet_log_table(bets: pd.DataFrame, log_type: str, pred_col, pred_label):
@@ -189,11 +189,14 @@ def _render_strategy_section(cfg: dict, bets: pd.DataFrame, i: int):
             return
 
         # Metrics row
-        c1, c2, c3, c4 = st.columns(4)
+        clv_vals = bets["clv"].dropna() if "clv" in bets.columns else pd.Series([], dtype=float)
+        avg_clv  = clv_vals.mean() if not clv_vals.empty else None
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Record",   f"{wins}-{total-wins}")
         c2.metric("Win Rate", f"{wins/total:.1%}" if total > 0 else "—")
         c3.metric("Units",    f"{units:+.2f}u")
         c4.metric("ROI",      f"{roi:+.1f}%")
+        c5.metric("Avg CLV",  f"{avg_clv:+.1%}" if avg_clv is not None else "—")
 
         # Charts
         ch1, ch2 = st.columns(2)

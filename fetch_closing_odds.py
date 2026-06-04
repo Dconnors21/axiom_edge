@@ -16,9 +16,11 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 from config import DB_PATH, ODDS_API_KEY, SHARP_BOOKS
 from mlb_config import MLB_DB_PATH, ODDS_API_KEY as MLB_ODDS_KEY, SHARP_BOOKS as MLB_SHARP_BOOKS
+from nhl_config import NHL_DB_PATH, ODDS_API_KEY as NHL_ODDS_KEY, SHARP_BOOKS as NHL_SHARP_BOOKS
 
 NBA_SPORT = "basketball_nba"
 MLB_SPORT = "baseball_mlb"
+NHL_SPORT = "icehockey_nhl"
 
 _CREATE_SQL = """
     CREATE TABLE IF NOT EXISTS {table} (
@@ -172,6 +174,9 @@ if __name__ == "__main__":
                                 ODDS_API_KEY, SHARP_BOOKS)
     mlb_games = fetch_and_store(MLB_SPORT, MLB_DB_PATH, "mlb_closing_odds",
                                 MLB_ODDS_KEY, MLB_SHARP_BOOKS)
+    nhl_games = fetch_and_store(NHL_SPORT, NHL_DB_PATH, "nhl_closing_odds",
+                                NHL_ODDS_KEY, NHL_SHARP_BOOKS)
 
-    print(f"\n  Done. NBA: {nba_games} game(s) | MLB: {mlb_games} game(s)")
+    print(f"\n  Done. NBA: {nba_games} game(s) | MLB: {mlb_games} game(s) | "
+          f"NHL: {nhl_games} game(s)")
     print(f"  CLV will be computed automatically when results are resolved tonight.")
