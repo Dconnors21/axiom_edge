@@ -1,8 +1,8 @@
-# props_predict.py
-# Generates NBA player points over/under predictions for today's props lines.
-# P(over) = Normal CDF((pred_pts - line) / sigma)
+# props_predict_blk.py
+# Generates NBA player blocks over/under predictions for today's props lines.
+# P(over) = Normal CDF((pred_blk - line) / sigma)
 #
-# Usage: python props_predict.py
+# Usage: python props_predict_blk.py
 
 import sqlite3
 import json
@@ -14,14 +14,14 @@ from pathlib import Path
 from scipy.stats import norm
 from config import DB_PATH, KELLY_FRACTION
 
-PROPS_MIN_EDGE   = 0.12   # 12% — raised to reduce regression-to-mean false positives
-STAR_PPG_CUTOFF  = 15.0   # players averaging above this are considered stars
-STAR_LINE_BUFFER = 5.0    # skip unders when line is within this many pts of season avg
-PROPS_MARKET   = "player_points"
-PROPS_BOOKS    = ["draftkings", "fanduel"]
+PROPS_MIN_EDGE     = 0.12
+STAR_BLK_CUTOFF    = 2.0    # avg blocks above which suppress unders (rim protectors)
+STAR_LINE_BUFFER   = 0.8    # skip unders when line is within 0.8 of season avg
+PROPS_MARKET       = "player_blocks"
+PROPS_BOOKS        = ["draftkings", "fanduel"]
 
 _CREATE_SQL = """
-    CREATE TABLE IF NOT EXISTS props_predictions (
+    CREATE TABLE IF NOT EXISTS props_blk_predictions (
         player_name   TEXT,
         game_id       TEXT,
         predict_date  TEXT,
@@ -30,7 +30,7 @@ _CREATE_SQL = """
         commence_time TEXT,
         bookmaker     TEXT,
         line          REAL,
-        pred_pts      REAL,
+        pred_blk      REAL,
         over_prob     REAL,
         under_prob    REAL,
         over_fair     REAL,
@@ -44,7 +44,7 @@ _CREATE_SQL = """
         over_price    REAL,
         under_price   REAL,
         props_sigma   REAL,
-        actual_pts    REAL,
+        actual_blk    REAL,
         PRIMARY KEY (player_name, game_id, predict_date)
     )
 """
@@ -73,12 +73,14 @@ def kelly(edge, prob, odds, fraction=KELLY_FRACTION):
     return max(0, k * fraction)
 
 
-def load_todays_props(conn) -> pd.DataFrame:
+def load_todays_blk_props(conn) -> pd.DataFrame:
     now    = datetime.now(timezone.utc)
     cutoff = now + timedelta(hours=24)
     try:
-        df = pd.read_sql("SELECT * FROM props_odds WHERE market=? ORDER BY pulled_at DESC",
-                         conn, params=(PROPS_MARKET,))
+        df = pd.read_sql(
+            "SELECT * FROM props_odds WHERE market=? ORDER BY pulled_at DESC",
+            conn, params=(PROPS_MARKET,)
+        )
     except Exception:
         return pd.DataFrame()
 
@@ -90,7 +92,6 @@ def load_todays_props(conn) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
 
-    # Dedup: keep freshest pull, pick preferred book per player/game
     df = df.sort_values("pulled_at", ascending=False)
     df = df.drop_duplicates(subset=["player_name", "game_id", "bookmaker"])
 
@@ -115,11 +116,11 @@ def load_todays_props(conn) -> pd.DataFrame:
 
 
 def build_player_features(props_df, conn, feature_cols) -> pd.DataFrame:
-    """For each player in today's props, build their most recent feature vector."""
     logs = pd.read_sql("""
         SELECT player_id, player_name, team_abbreviation, game_id, game_date,
-               season, matchup, is_home, min_played, pts
+               season, matchup, is_home, min_played, blk
         FROM player_game_logs
+        WHERE blk IS NOT NULL
         ORDER BY player_id, game_date ASC
     """, conn)
 
@@ -128,7 +129,6 @@ def build_player_features(props_df, conn, feature_cols) -> pd.DataFrame:
 
     logs["game_date"] = pd.to_datetime(logs["game_date"])
 
-    # Opponent defensive stats lookup
     def_stats = pd.read_sql("""
         SELECT season, team_name, opp_pts, def_rtg, pace FROM team_season_stats
     """, conn)
@@ -140,12 +140,10 @@ def build_player_features(props_df, conn, feature_cols) -> pd.DataFrame:
     def_stats = def_stats.dropna(subset=["team_abbrev"])
     def_lookup = def_stats.set_index(["season", "team_abbrev"]).to_dict("index")
 
-    # Normalize names for fuzzy matching
     def norm_name(n):
         return str(n).lower().strip()
 
-    player_lookup = {norm_name(n): grp
-                     for n, grp in logs.groupby("player_name")}
+    player_lookup = {norm_name(n): grp for n, grp in logs.groupby("player_name")}
 
     rows = []
     for _, prop in props_df.iterrows():
@@ -159,24 +157,19 @@ def build_player_features(props_df, conn, feature_cols) -> pd.DataFrame:
         last = hist.iloc[-1]
         season = last["season"]
 
-        pts_l3  = hist["pts"].tail(3).mean()
-        pts_l5  = hist["pts"].tail(5).mean()
-        pts_l10 = hist["pts"].tail(10).mean()
-        pts_std = hist["pts"].tail(10).std()
+        blk_l3  = hist["blk"].tail(3).mean()
+        blk_l5  = hist["blk"].tail(5).mean()
+        blk_l10 = hist["blk"].tail(10).mean()
+        blk_std = hist["blk"].tail(10).std()
         min_l5  = hist["min_played"].tail(5).mean()
-        season_pts = hist[hist["season"] == season]["pts"].mean()
+        season_blk = hist[hist["season"] == season]["blk"].mean()
 
-        home_pts = hist[hist["is_home"]==1]["pts"].tail(5).mean()
-        away_pts = hist[hist["is_home"]==0]["pts"].tail(5).mean()
+        home_blk = hist[hist["is_home"]==1]["blk"].tail(5).mean()
+        away_blk = hist[hist["is_home"]==0]["blk"].tail(5).mean()
 
-        is_home = int(prop.get("home_team","") in
-                      (hist["team_abbreviation"].iloc[-1] if "team_abbreviation" in hist.columns else ""))
+        today_ts  = pd.Timestamp(date.today())
+        days_rest = min((today_ts - last["game_date"]).days, 7)
 
-        # Days rest — use today minus last game date
-        today = pd.Timestamp(date.today())
-        days_rest = min((today - last["game_date"]).days, 7)
-
-        # Opponent defensive context — derive from game teams
         home_team = prop.get("home_team", "")
         away_team = prop.get("away_team", "")
         team_abbr = last.get("team_abbreviation", "")
@@ -186,6 +179,8 @@ def build_player_features(props_df, conn, feature_cols) -> pd.DataFrame:
         opp_def_rtg = opp_info.get("def_rtg",  108.0)
         opp_pace    = opp_info.get("pace",      100.0)
         opp_opp_pts = opp_info.get("opp_pts",   110.0)
+
+        is_home = int(team_abbr in str(home_team)) if team_abbr else 0
 
         feat = {
             "player_name":   pname,
@@ -199,9 +194,13 @@ def build_player_features(props_df, conn, feature_cols) -> pd.DataFrame:
             "under_price":   prop["under_price"],
             "over_fair":     prop["over_fair"],
             "under_fair":    prop["under_fair"],
+            "season_blk":    season_blk if not np.isnan(season_blk) else blk_l10,
+            "blk_home_l5":   home_blk if not np.isnan(home_blk) else blk_l5,
+            "blk_away_l5":   away_blk if not np.isnan(away_blk) else blk_l5,
         }
         for col in feature_cols:
-            feat[col] = locals().get(col, np.nan)
+            if col not in feat:
+                feat[col] = locals().get(col, np.nan)
 
         rows.append(feat)
 
@@ -210,13 +209,13 @@ def build_player_features(props_df, conn, feature_cols) -> pd.DataFrame:
 
 def generate_predictions(features_df, model, feature_cols, sigma) -> pd.DataFrame:
     X = features_df[feature_cols].fillna(0)
-    pred_pts = model.predict(X)
+    pred_blk = model.predict(X)
 
     df = features_df.copy()
-    df["pred_pts"] = pred_pts
+    df["pred_blk"] = pred_blk
 
     df["over_prob"]  = df.apply(
-        lambda r: float(norm.cdf((r["pred_pts"] - r["line"]) / sigma))
+        lambda r: float(norm.cdf((r["pred_blk"] - r["line"]) / sigma))
         if pd.notna(r.get("line")) else 0.5, axis=1
     )
     df["under_prob"] = 1.0 - df["over_prob"]
@@ -236,17 +235,16 @@ def generate_predictions(features_df, model, feature_cols, sigma) -> pd.DataFram
     df["over_value"]  = (df["over_edge"]  > PROPS_MIN_EDGE).astype(int)
     df["under_value"] = (df["under_edge"] > PROPS_MIN_EDGE).astype(int)
 
-    # Star-player under guard: don't fade a high-volume scorer when the line
-    # is close to their season average — the model is likely regressing to mean.
-    if "season_pts" in df.columns:
+    # Rim protector guard: don't fade elite shot-blockers near their season avg
+    if "season_blk" in df.columns:
         star_mask = (
-            (df["season_pts"] > STAR_PPG_CUTOFF) &
-            (df["line"] >= df["season_pts"] - STAR_LINE_BUFFER)
+            (df["season_blk"] > STAR_BLK_CUTOFF) &
+            (df["line"] >= df["season_blk"] - STAR_LINE_BUFFER)
         )
         suppressed = star_mask & (df["under_value"] == 1)
         if suppressed.any():
             for name in df.loc[suppressed, "player_name"]:
-                print(f"  [guard] Suppressed under for {name} — line near season avg")
+                print(f"  [guard] Suppressed blocks under for {name} — line near season avg")
         df.loc[star_mask, "under_value"] = 0
 
     df["props_sigma"] = sigma
@@ -256,50 +254,50 @@ def generate_predictions(features_df, model, feature_cols, sigma) -> pd.DataFram
 def save_predictions(df, conn):
     conn.execute(_CREATE_SQL)
     today = date.today().isoformat()
-    conn.execute("DELETE FROM props_predictions WHERE predict_date=?", (today,))
+    conn.execute("DELETE FROM props_blk_predictions WHERE predict_date=?", (today,))
     df["predict_date"] = today
-    df["actual_pts"]   = None
+    df["actual_blk"]   = None
 
     save_cols = [c for c in df.columns if c in [
         "player_name","game_id","predict_date","home_team","away_team",
-        "commence_time","bookmaker","line","pred_pts",
+        "commence_time","bookmaker","line","pred_blk",
         "over_prob","under_prob","over_fair","under_fair",
         "over_edge","under_edge","over_value","under_value",
         "over_kelly","under_kelly","over_price","under_price",
-        "props_sigma","actual_pts",
+        "props_sigma","actual_blk",
     ]]
-    df[save_cols].to_sql("props_predictions", conn,
+    df[save_cols].to_sql("props_blk_predictions", conn,
                          if_exists="append", index=False, chunksize=100)
     conn.commit()
-    print(f"  Props predictions saved -> nba.db: props_predictions")
+    print(f"  Blocks predictions saved -> nba.db: props_blk_predictions")
 
 
 if __name__ == "__main__":
-    print("\n-- Props Predict: Player Points ------------------------------------")
+    print("\n-- Props Predict: Player Blocks ------------------------------------")
 
-    for fname in ["props_points_model.pkl", "props_points_features.json",
-                  "props_points_model_std.json"]:
+    for fname in ["props_blk_model.pkl", "props_blk_features.json",
+                  "props_blk_model_std.json"]:
         if not Path(fname).exists():
-            print(f"  ERROR: {fname} not found. Run python train_props.py first.")
+            print(f"  ERROR: {fname} not found. Run python train_props_blk.py first.")
             exit(1)
 
-    with open("props_points_model.pkl", "rb") as f:
+    with open("props_blk_model.pkl", "rb") as f:
         model = pickle.load(f)
-    with open("props_points_features.json") as f:
+    with open("props_blk_features.json") as f:
         feature_cols = json.load(f)
-    with open("props_points_model_std.json") as f:
+    with open("props_blk_model_std.json") as f:
         sigma = json.load(f)["rmse"]
 
-    print(f"  Model loaded. sigma={sigma:.2f} pts. Features: {len(feature_cols)}")
+    print(f"  Model loaded. sigma={sigma:.2f} blk. Features: {len(feature_cols)}")
 
     conn = get_conn()
 
-    props_df = load_todays_props(conn)
+    props_df = load_todays_blk_props(conn)
     if props_df.empty:
-        print("  No props lines found. Run python props_odds.py first.")
+        print("  No blocks lines found. Run python props_odds.py first.")
         conn.close()
         exit()
-    print(f"  Found {len(props_df)} player line(s) for today.")
+    print(f"  Found {len(props_df)} player blocks line(s) for today.")
 
     features_df = build_player_features(props_df, conn, feature_cols)
     if features_df.empty:
@@ -315,7 +313,7 @@ if __name__ == "__main__":
     value_count = len(value_over) + len(value_under)
 
     print(f"\n{'='*60}")
-    print(f"  PLAYER POINTS PICKS  (min edge: {PROPS_MIN_EDGE:.0%})")
+    print(f"  PLAYER BLOCKS PICKS  (min edge: {PROPS_MIN_EDGE:.0%})")
     print(f"{'='*60}")
 
     for _, g in results.sort_values("over_edge", ascending=False).head(15).iterrows():
@@ -323,12 +321,12 @@ if __name__ == "__main__":
         away = g["away_team"].split()[-1]
         line = g["line"]
         print(f"  {g['player_name']} ({away} @ {home})")
-        print(f"    Pred: {g['pred_pts']:.1f}  Line: {line}  "
+        print(f"    Pred: {g['pred_blk']:.1f}  Line: {line}  "
               f"P(over): {g['over_prob']:.1%}  Over edge: {g['over_edge']:+.1%}")
         if g["over_value"]:
-            print(f"    >> VALUE: OVER {line}")
+            print(f"    >> VALUE: OVER {line} BLK")
         elif g["under_value"]:
-            print(f"    >> VALUE: UNDER {line}")
+            print(f"    >> VALUE: UNDER {line} BLK")
         print()
 
     print(f"  Value picks: {value_count}")

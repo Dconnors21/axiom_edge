@@ -1,9 +1,9 @@
 # props_odds.py
-# Fetches NBA player points props from The Odds API and stores them in props_odds.
+# Fetches NBA player props (points + rebounds) from The Odds API and stores them.
 #
 # NOTE: Player props use the per-event endpoint (/events/{id}/odds), which costs
-# roughly 1 API credit per bookmaker per event. Fetching 10 games x 2 books = ~20
-# credits per run. On the free tier (500/month) that allows ~25 daily runs.
+# roughly 1 API credit per bookmaker per event. Fetching 10 games x 2 books x 2 markets
+# = ~40 credits per run. On the free tier (500/month) that allows ~12 daily runs.
 # If you hit the limit, set PROPS_BOOKS to just ["draftkings"].
 #
 # Usage: python props_odds.py
@@ -15,9 +15,10 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 from config import DB_PATH, ODDS_API_KEY
 
-PROPS_SPORT  = "basketball_nba"
-PROPS_MARKET = "player_points"
-PROPS_BOOKS  = ["draftkings", "fanduel"]   # Pinnacle rarely lists player props
+PROPS_SPORT   = "basketball_nba"
+PROPS_MARKETS = ["player_points", "player_rebounds", "player_assists", "player_threes",
+                 "player_steals", "player_blocks"]                                        # expand here for more props
+PROPS_BOOKS   = ["draftkings", "fanduel"]              # Pinnacle rarely lists player props
 
 _CREATE_SQL = """
     CREATE TABLE IF NOT EXISTS props_odds (
@@ -32,13 +33,36 @@ _CREATE_SQL = """
         over_price    REAL,
         under_price   REAL,
         pulled_at     TEXT,
-        PRIMARY KEY (player_name, game_id, bookmaker, pulled_at)
+        PRIMARY KEY (player_name, game_id, bookmaker, market, pulled_at)
     )
 """
 
 
 def get_conn():
     return sqlite3.connect(DB_PATH)
+
+
+def _maybe_migrate(conn):
+    """Add market to PRIMARY KEY if the existing table uses the old PK schema."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='props_odds'"
+    ).fetchone()
+    if row is None:
+        return  # table will be created fresh by _CREATE_SQL
+    sql = row[0]
+    pk_start = sql.upper().find("PRIMARY KEY")
+    if pk_start == -1:
+        return
+    pk_clause = sql[pk_start:]
+    if "market" in pk_clause.lower():
+        return  # already on new schema
+    print("  Migrating props_odds table to include market in PRIMARY KEY...")
+    conn.execute("ALTER TABLE props_odds RENAME TO props_odds_v1")
+    conn.execute(_CREATE_SQL.replace("IF NOT EXISTS ", ""))
+    conn.execute("INSERT OR IGNORE INTO props_odds SELECT * FROM props_odds_v1")
+    conn.execute("DROP TABLE props_odds_v1")
+    conn.commit()
+    print("  Migration complete.")
 
 
 def _american_to_implied(odds):
@@ -68,14 +92,14 @@ def fetch_todays_event_ids(conn) -> list:
         return []
 
 
-def fetch_props_for_event(event_id: str) -> list:
-    """Call the Odds API per-event endpoint and return raw bookmaker data."""
+def fetch_props_for_event(event_id: str, market: str) -> list:
+    """Call the Odds API per-event endpoint for a single market and return raw bookmaker data."""
     url = (f"https://api.the-odds-api.com/v4/sports/{PROPS_SPORT}"
            f"/events/{event_id}/odds")
     params = {
         "apiKey":      ODDS_API_KEY,
         "regions":     "us",
-        "markets":     PROPS_MARKET,
+        "markets":     market,
         "oddsFormat":  "american",
         "bookmakers":  ",".join(PROPS_BOOKS),
     }
@@ -84,7 +108,7 @@ def fetch_props_for_event(event_id: str) -> list:
         if resp.status_code == 422:
             return []   # event not found / no props market
         if resp.status_code != 200:
-            print(f"    API error {resp.status_code} for {event_id}")
+            print(f"    API error {resp.status_code} for {event_id} ({market})")
             return []
         return resp.json().get("bookmakers", [])
     except Exception as e:
@@ -92,14 +116,15 @@ def fetch_props_for_event(event_id: str) -> list:
         return []
 
 
-def parse_and_store(bookmakers: list, event: dict, conn: sqlite3.Connection) -> int:
+def parse_and_store(bookmakers: list, event: dict, market: str,
+                    conn: sqlite3.Connection) -> int:
     pulled_at = datetime.now(timezone.utc).isoformat()
     rows = []
 
     for book in bookmakers:
         bk = book["key"]
         for mkt in book.get("markets", []):
-            if mkt["key"] != PROPS_MARKET:
+            if mkt["key"] != market:
                 continue
 
             # Group Over/Under by player (keyed by description = player name)
@@ -125,7 +150,7 @@ def parse_and_store(bookmakers: list, event: dict, conn: sqlite3.Connection) -> 
                     event["away_team"],
                     event["commence_time"],
                     bk,
-                    PROPS_MARKET,
+                    market,
                     data["line"],
                     data["over_price"],
                     data["under_price"],
@@ -144,9 +169,10 @@ def parse_and_store(bookmakers: list, event: dict, conn: sqlite3.Connection) -> 
 
 
 if __name__ == "__main__":
-    print("\n-- Props Odds Fetch (Player Points) --------------------------------")
+    print("\n-- Props Odds Fetch (Points + Rebounds + Assists + 3PM + Stl + Blk) -")
 
     conn = get_conn()
+    _maybe_migrate(conn)
     conn.execute(_CREATE_SQL)
     conn.commit()
 
@@ -159,14 +185,20 @@ if __name__ == "__main__":
     print(f"  {len(events)} game(s) to fetch props for.")
     total_rows = 0
 
-    for i, event in enumerate(events):
-        time.sleep(0.5)
-        bookmakers = fetch_props_for_event(event["game_id"])
-        n = parse_and_store(bookmakers, event, conn)
-        home = event["home_team"].split()[-1]
-        away = event["away_team"].split()[-1]
-        print(f"  [{i+1}/{len(events)}] {away} @ {home} — {n} player lines stored")
-        total_rows += n
+    for market in PROPS_MARKETS:
+        market_label = market.replace("player_", "").replace("_", " ").title()
+        print(f"\n  Market: {market_label}")
+        market_rows = 0
+        for i, event in enumerate(events):
+            time.sleep(0.4)
+            bookmakers = fetch_props_for_event(event["game_id"], market)
+            n = parse_and_store(bookmakers, event, market, conn)
+            home = event["home_team"].split()[-1]
+            away = event["away_team"].split()[-1]
+            print(f"    [{i+1}/{len(events)}] {away} @ {home} — {n} lines")
+            market_rows += n
+        print(f"  {market_label} total: {market_rows} lines")
+        total_rows += market_rows
 
     unique_players = conn.execute("""
         SELECT COUNT(DISTINCT player_name) FROM props_odds
