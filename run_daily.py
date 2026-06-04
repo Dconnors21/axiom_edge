@@ -12,6 +12,7 @@
 import subprocess
 import argparse
 import sys
+import os
 import time
 import sqlite3
 from datetime import date, datetime, timedelta
@@ -33,9 +34,11 @@ def log(msg: str):
 def run(script: str, label: str) -> bool:
     log(f"Starting {label}...")
     start  = time.time()
+    env    = {**os.environ, "PYTHONUTF8": "1"}
     result = subprocess.run(
         [sys.executable, script],
-        capture_output=True, text=True, cwd=str(Path(__file__).parent)
+        capture_output=True, text=True, encoding="utf-8",
+        cwd=str(Path(__file__).parent), env=env
     )
     elapsed = time.time() - start
 
@@ -75,10 +78,28 @@ def _should_retrain(model_file: str = "model.pkl") -> bool:
     return is_monday or age_days > 7
 
 
+_STAMP_DIR = Path("logs") / "stamps"
+
+def _already_ran_today(pipeline: str) -> bool:
+    """Returns True if this pipeline already completed successfully today."""
+    _STAMP_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = _STAMP_DIR / f"{pipeline}_{date.today().isoformat()}.stamp"
+    return stamp.exists()
+
+def _mark_ran_today(pipeline: str):
+    """Write a stamp file so we know this pipeline ran today."""
+    _STAMP_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = _STAMP_DIR / f"{pipeline}_{date.today().isoformat()}.stamp"
+    stamp.write_text(datetime.now().isoformat())
+
+
 # ── Pipelines ─────────────────────────────────────────────────────────────────
 
 def morning_pipeline():
     today = date.today().isoformat()
+    if _already_ran_today("morning"):
+        log(f"Morning pipeline already ran today ({today}) — skipping.")
+        return True
     log("=" * 60)
     log(f"AXIOM EDGE — MORNING PIPELINE — {today}")
     log("=" * 60)
@@ -102,12 +123,52 @@ def morning_pipeline():
         _clear_stale_predictions("nba.db", "predictions", today)
         _clear_stale_predictions("nba.db", "spread_predictions", today)
         _clear_stale_predictions("nba.db", "totals_predictions", today)
-        _clear_stale_predictions("nba.db", "props_predictions", today)
+        _clear_stale_predictions("nba.db", "props_predictions",     today)
+        _clear_stale_predictions("nba.db", "props_reb_predictions", today)
+        _clear_stale_predictions("nba.db", "props_ast_predictions",    today)
+        _clear_stale_predictions("nba.db", "props_threes_predictions", today)
+        _clear_stale_predictions("nba.db", "props_stl_predictions",   today)
+        _clear_stale_predictions("nba.db", "props_blk_predictions",   today)
         run("predict.py",        "NBA: generating moneyline picks")
         run("spread_predict.py", "NBA: generating ATS picks")
         run("totals_predict.py", "NBA: generating totals picks")
-        run("props_odds.py",     "NBA: fetching player props lines")
+        run("props_odds.py",     "NBA: fetching player props lines (pts + reb + ast + 3PM + stl + blk)")
         run("props_predict.py",  "NBA: generating player points picks")
+        if _should_retrain("props_reb_model.pkl"):
+            log("Retraining rebounds model (weekly schedule or missing)...")
+            run("train_props_reb.py", "NBA: training rebounds model")
+        else:
+            age = (time.time() - Path("props_reb_model.pkl").stat().st_mtime) / 86400
+            log(f"Skipping reb retrain — model is {age:.1f} days old")
+        run("props_predict_reb.py", "NBA: generating player rebounds picks")
+        if _should_retrain("props_ast_model.pkl"):
+            log("Retraining assists model (weekly schedule or missing)...")
+            run("train_props_ast.py", "NBA: training assists model")
+        else:
+            age = (time.time() - Path("props_ast_model.pkl").stat().st_mtime) / 86400
+            log(f"Skipping ast retrain — model is {age:.1f} days old")
+        run("props_predict_ast.py", "NBA: generating player assists picks")
+        if _should_retrain("props_threes_model.pkl"):
+            log("Retraining 3-pointers model (weekly schedule or missing)...")
+            run("train_props_threes.py", "NBA: training 3-pointers model")
+        else:
+            age = (time.time() - Path("props_threes_model.pkl").stat().st_mtime) / 86400
+            log(f"Skipping 3PM retrain — model is {age:.1f} days old")
+        run("props_predict_threes.py", "NBA: generating player 3-pointers picks")
+        if _should_retrain("props_stl_model.pkl"):
+            log("Retraining steals model (weekly schedule or missing)...")
+            run("train_props_stl.py", "NBA: training steals model")
+        else:
+            age = (time.time() - Path("props_stl_model.pkl").stat().st_mtime) / 86400
+            log(f"Skipping stl retrain — model is {age:.1f} days old")
+        run("props_predict_stl.py", "NBA: generating player steals picks")
+        if _should_retrain("props_blk_model.pkl"):
+            log("Retraining blocks model (weekly schedule or missing)...")
+            run("train_props_blk.py", "NBA: training blocks model")
+        else:
+            age = (time.time() - Path("props_blk_model.pkl").stat().st_mtime) / 86400
+            log(f"Skipping blk retrain — model is {age:.1f} days old")
+        run("props_predict_blk.py", "NBA: generating player blocks picks")
     else:
         log("NBA odds fetch failed — skipping NBA predictions today")
 
@@ -136,6 +197,53 @@ def morning_pipeline():
     else:
         log("MLB odds/pitcher fetch failed — skipping MLB predictions today")
 
+    # ── MLB Player Props ──────────────────────────────────────────────────────
+    log("─── MLB Player Props ──────────────────────────────────────")
+
+    run("mlb_props_collect.py", "MLB Props: collecting player game logs")
+
+    if _should_retrain("mlb_k_model.pkl"):
+        log("Retraining MLB props models (weekly schedule or missing)...")
+        run("mlb_props_train.py", "MLB Props: model training (K's, hits, TB)")
+    else:
+        age = (time.time() - Path("mlb_k_model.pkl").stat().st_mtime) / 86400
+        log(f"Skipping MLB props retrain — models are {age:.1f} days old")
+
+    mlb_props_odds_ok = run("mlb_props_odds.py", "MLB Props: fetching prop odds (K's, hits, TB)")
+    if mlb_props_odds_ok:
+        _clear_stale_predictions("mlb.db", "mlb_props_predictions_k",    today)
+        _clear_stale_predictions("mlb.db", "mlb_props_predictions_hits", today)
+        _clear_stale_predictions("mlb.db", "mlb_props_predictions_tb",   today)
+        run("mlb_props_predict.py", "MLB Props: generating player prop picks")
+    else:
+        log("MLB props odds fetch failed — skipping prop predictions today")
+
+    # ── NHL ──────────────────────────────────────────────────────────────────
+    log("─── NHL ───────────────────────────────────────────────────")
+
+    run("nhl_collect.py",  "NHL: data collection")
+    run("nhl_features.py", "NHL: feature engineering")
+
+    if _should_retrain("nhl_model.pkl"):
+        log("Retraining NHL moneyline model (weekly schedule or missing)...")
+        run("nhl_train.py",          "NHL: moneyline model training")
+        run("nhl_train_spread.py",   "NHL: puck line model training")
+        run("nhl_train_totals.py",   "NHL: totals model training")
+    else:
+        age = (time.time() - Path("nhl_model.pkl").stat().st_mtime) / 86400
+        log(f"Skipping NHL retrain — model is {age:.1f} days old")
+
+    nhl_odds_ok = run("nhl_odds.py", "NHL: odds fetching")
+    if nhl_odds_ok:
+        _clear_stale_predictions("nhl.db", "nhl_predictions",        today)
+        _clear_stale_predictions("nhl.db", "nhl_spread_predictions",  today)
+        _clear_stale_predictions("nhl.db", "nhl_totals_predictions",  today)
+        run("nhl_predict.py",        "NHL: generating moneyline picks")
+        run("nhl_spread_predict.py", "NHL: generating puck line picks")
+        run("nhl_totals_predict.py", "NHL: generating totals picks")
+    else:
+        log("NHL odds fetch failed — skipping NHL predictions today")
+
     # ── Discord alert ─────────────────────────────────────────────────────────
     log("─── Discord ────────────────────────────────────────────────")
     try:
@@ -144,6 +252,7 @@ def morning_pipeline():
     except Exception as e:
         log(f"  Discord alert error: {e}")
 
+    _mark_ran_today("morning")
     log("=" * 60)
     log("Morning pipeline complete — check dashboard: streamlit run Axiom_Edge.py")
     log("=" * 60)
@@ -153,6 +262,9 @@ def morning_pipeline():
 def evening_pipeline():
     today     = date.today().isoformat()
     yesterday = (date.today() - timedelta(days=1)).isoformat()
+    if _already_ran_today("evening"):
+        log(f"Evening pipeline already ran today ({today}) — skipping.")
+        return
     log("=" * 60)
     log(f"AXIOM EDGE — EVENING PIPELINE — {today}")
     log("=" * 60)
@@ -177,14 +289,14 @@ def evening_pipeline():
             [sys.executable, "results_fetcher.py", "--date", nba_target],
             cwd=str(Path(__file__).parent)
         )
-        # Pull player logs for that date, then resolve props
+        # Pull player logs for that date, then resolve props (all stats)
         log(f"Resolving player props for {nba_target}...")
         subprocess.run(
             [sys.executable, "collect_props.py", "--date", nba_target],
             cwd=str(Path(__file__).parent)
         )
         subprocess.run(
-            [sys.executable, "props_results_fetcher.py", "--date", nba_target],
+            [sys.executable, "props_results_fetcher.py", "--date", nba_target, "--stat", "all"],
             cwd=str(Path(__file__).parent)
         )
     else:
@@ -216,6 +328,62 @@ def evening_pipeline():
     except Exception as e:
         log(f"MLB results check failed: {e}")
 
+    # ── MLB Props results ─────────────────────────────────────────────────────
+    log("─── MLB props results ──────────────────────────────────────")
+    try:
+        mlb_props_conn = sqlite3.connect("mlb.db")
+        try:
+            mlb_props_tp = mlb_props_conn.execute(
+                "SELECT COUNT(*) FROM mlb_props_predictions_k WHERE predict_date=? AND actual_val IS NULL",
+                (today,)
+            ).fetchone()[0]
+            mlb_props_yp = mlb_props_conn.execute(
+                "SELECT COUNT(*) FROM mlb_props_predictions_k WHERE predict_date=? AND actual_val IS NULL",
+                (yesterday,)
+            ).fetchone()[0]
+        except Exception:
+            mlb_props_tp = mlb_props_yp = 0
+        mlb_props_conn.close()
+
+        mlb_props_target = today if mlb_props_tp > 0 else (yesterday if mlb_props_yp > 0 else None)
+        if mlb_props_target:
+            log(f"Fetching MLB prop results for {mlb_props_target}...")
+            subprocess.run(
+                [sys.executable, "mlb_props_results_fetcher.py", "--date", mlb_props_target],
+                cwd=str(Path(__file__).parent)
+            )
+        else:
+            log("No unresolved MLB prop predictions found")
+    except Exception as e:
+        log(f"MLB props results check failed: {e}")
+
+    # ── NHL results ───────────────────────────────────────────────────────────
+    log("─── NHL results ────────────────────────────────────────────")
+    try:
+        nhl_conn = sqlite3.connect("nhl.db")
+        nhl_tp = nhl_conn.execute(
+            "SELECT COUNT(*) FROM nhl_predictions WHERE predict_date=? AND actual_home_win IS NULL",
+            (today,)
+        ).fetchone()[0]
+        nhl_yp = nhl_conn.execute(
+            "SELECT COUNT(*) FROM nhl_predictions WHERE predict_date=? AND actual_home_win IS NULL",
+            (yesterday,)
+        ).fetchone()[0]
+        nhl_conn.close()
+
+        nhl_target = today if nhl_tp > 0 else (yesterday if nhl_yp > 0 else None)
+        if nhl_target:
+            log(f"Fetching NHL results for {nhl_target}...")
+            subprocess.run(
+                [sys.executable, "nhl_results_fetcher.py", "--date", nhl_target],
+                cwd=str(Path(__file__).parent)
+            )
+        else:
+            log("No unresolved NHL predictions found")
+    except Exception as e:
+        log(f"NHL results check failed: {e}")
+
+    _mark_ran_today("evening")
     log("=" * 60)
     log("Evening pipeline complete — ROI tracker updated")
     log("=" * 60)

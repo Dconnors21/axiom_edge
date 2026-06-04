@@ -12,22 +12,68 @@ from mlb_config import MLB_DB_PATH
 
 _CSS = """
 <style>
-.block-container{padding-top:1.5rem;padding-bottom:2rem;max-width:1100px}
-[data-testid="metric-container"]{background:#13131a;border:1px solid #1e1e28;border-radius:10px;padding:1rem 1.25rem}
-[data-testid="metric-container"] label{color:#6b6b78!important;font-size:12px!important;letter-spacing:.05em;text-transform:uppercase}
-[data-testid="stMetricValue"]{color:#e8e8ec!important;font-size:24px!important;font-weight:700!important}
-.sh{font-size:11px;font-weight:600;letter-spacing:.1em;color:#44444f;text-transform:uppercase;margin:1.5rem 0 .75rem;padding-bottom:8px;border-bottom:1px solid #1e1e28}
+.block-container{padding-top:0;padding-bottom:2rem;max-width:1600px;padding-left:2rem;padding-right:2rem}
+[data-testid="metric-container"]{background:#131d2e;border:1px solid #1e2d42;border-radius:10px;padding:.7rem 1rem}
+[data-testid="metric-container"] label{color:#8090a8!important;font-size:11px!important;letter-spacing:.06em;text-transform:uppercase}
+[data-testid="stMetricValue"]{color:#f0f2f5!important;font-size:20px!important;font-weight:700!important}
+.sh{font-size:11px;font-weight:700;letter-spacing:.1em;color:#8090a8;text-transform:uppercase;margin:1.25rem 0 .75rem;padding-bottom:6px;border-bottom:1px solid #1e2d42}
+.roi-header{background:linear-gradient(135deg,#0d1a2e 0%,#131d2e 60%,#0a1e0a 100%);border:1px solid #1e2d42;border-radius:12px;padding:1.5rem 2rem;margin-bottom:1.25rem;display:flex;align-items:center;justify-content:space-between}
+.roi-title{font-size:22px;font-weight:700;color:#f0f2f5;letter-spacing:-.3px}
+.roi-subtitle{font-size:12px;color:#8090a8;margin-top:3px}
+.roi-badge{background:#0f1828;color:#22c55e;border:1px solid rgba(34,197,94,.25);border-radius:6px;font-size:11px;font-weight:700;padding:4px 12px;letter-spacing:.04em}
+.strat-hdr{display:flex;align-items:center;gap:10px;margin-bottom:.875rem}
+.strat-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;display:inline-block}
+.strat-name{font-size:13px;font-weight:700;color:#c8d0dc;letter-spacing:.01em}
+.strat-rec{font-size:11px;color:#8090a8;margin-left:auto}
 </style>
 """
 
 _CHART = dict(
-    paper_bgcolor="#13131a", plot_bgcolor="#13131a",
+    paper_bgcolor="#131d2e", plot_bgcolor="#131d2e",
     margin=dict(l=0, r=0, t=10, b=0),
-    xaxis=dict(showgrid=False, color="#44444f"),
-    yaxis=dict(gridcolor="#1e1e28", color="#44444f", zeroline=False),
-    legend=dict(font=dict(color="#9090a0"), bgcolor="rgba(0,0,0,0)"),
-    font=dict(color="#9090a0"),
+    xaxis=dict(showgrid=False, color="#7a8fa8"),
+    yaxis=dict(gridcolor="#1a2840", color="#7a8fa8", zeroline=False),
+    legend=dict(font=dict(color="#8090a8"), bgcolor="rgba(0,0,0,0)"),
+    font=dict(color="#8090a8"),
 )
+
+# Strategy config — drives combined chart + individual sections
+MLB_ROI_CONFIGS = [
+    {
+        "key":       "ml",
+        "table":     "mlb_bet_log",
+        "label":     "Moneyline",
+        "color":     "#3b82f6",
+        "log_type":  "ml",
+        "pred_col":  None,
+        "pred_label": None,
+    },
+    {
+        "key":       "rl",
+        "table":     "mlb_ats_bet_log",
+        "label":     "Run Line (ATS)",
+        "color":     "#22c55e",
+        "log_type":  "spread",
+        "pred_col":  None,
+        "pred_label": None,
+    },
+    {
+        "key":       "totals",
+        "table":     "mlb_totals_bet_log",
+        "label":     "Totals (O/U)",
+        "color":     "#f59e0b",
+        "log_type":  "totals",
+        "pred_col":  "pred_total",
+        "pred_label": "Pred total",
+    },
+]
+
+_RGB = {
+    "#3b82f6": "59,130,246",
+    "#22c55e": "34,197,94",
+    "#f59e0b": "245,158,11",
+    "#ef4444": "239,68,68",
+}
 
 
 def _load(query, params=None):
@@ -41,6 +87,7 @@ def _load(query, params=None):
     conn.close()
     return df
 
+
 def _fmt(price):
     try:
         p = int(price)
@@ -48,26 +95,26 @@ def _fmt(price):
     except Exception:
         return "N/A"
 
-def _summary_metrics(bets, label):
+
+def _summary_metrics(bets):
     if bets.empty:
-        st.caption(f"No {label} bets resolved yet.")
         return
     wins     = (bets["result"] == "WIN").sum()
     total    = len(bets)
     units    = bets["profit_units"].sum()
-    win_pct  = wins / total
+    win_pct  = wins / total if total else 0
     avg_edge = bets["edge"].mean() if "edge" in bets.columns else 0
     clv_vals = bets["clv"].dropna() if "clv" in bets.columns else pd.Series([], dtype=float)
     avg_clv  = clv_vals.mean() if not clv_vals.empty else None
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Bets",      total)
-    c2.metric("Win rate",  f"{win_pct:.1%}")
-    c3.metric("Record",    f"{wins}W–{total-wins}L")
-    uc = "normal" if units >= 0 else "inverse"
-    c4.metric("Units P&L", f"{units:+.3f}", delta_color=uc)
-    c5.metric("Avg edge",  f"{avg_edge:+.1%}")
-    c6.metric("Avg CLV",   f"{avg_clv:+.1%}" if avg_clv is not None else "—")
+    c1.metric("Bets",       total)
+    c2.metric("Win rate",   f"{win_pct:.1%}")
+    c3.metric("Record",     f"{wins}W–{total-wins}L")
+    c4.metric("Units P&L",  f"{units:+.3f}", delta_color="normal" if units >= 0 else "inverse")
+    c5.metric("Avg edge",   f"{avg_edge:+.1%}")
+    c6.metric("Avg CLV",    f"{avg_clv:+.1%}" if avg_clv is not None else "—")
+
 
 def _cumulative_chart(bets, color):
     if bets.empty:
@@ -76,16 +123,19 @@ def _cumulative_chart(bets, color):
     bets["predict_date"] = pd.to_datetime(bets["predict_date"])
     bets["cumulative"]   = bets["profit_units"].cumsum()
     units = bets["profit_units"].sum()
-    cl    = color if units >= 0 else "#ef4444"
-    rgb   = "34,197,94" if cl == "#22c55e" else ("99,102,241" if cl == "#6366f1" else "239,68,68")
+    cl  = color if units >= 0 else "#ef4444"
+    rgb = _RGB.get(cl, "239,68,68")
 
     fig = go.Figure()
-    fig.add_scatter(x=bets["predict_date"], y=bets["cumulative"],
-                    mode="lines", line=dict(color=cl, width=2),
-                    fill="tozeroy", fillcolor=f"rgba({rgb},0.08)")
-    fig.add_hline(y=0, line_color="#333340", line_width=1)
-    fig.update_layout(height=220, **_CHART)
+    fig.add_scatter(
+        x=bets["predict_date"], y=bets["cumulative"],
+        mode="lines", line=dict(color=cl, width=2),
+        fill="tozeroy", fillcolor=f"rgba({rgb},0.08)",
+    )
+    fig.add_hline(y=0, line_color="#1e2d42", line_width=1)
+    fig.update_layout(height=200, **_CHART)
     st.plotly_chart(fig, use_container_width=True)
+
 
 def _monthly_and_edge(bets):
     if bets.empty:
@@ -99,171 +149,190 @@ def _monthly_and_edge(bets):
         bets["month"] = bets["predict_date"].dt.to_period("M").astype(str)
         mo = bets.groupby("month").agg(
             bets=("result", "count"),
-            wins=("result", lambda x: (x=="WIN").sum()),
-            units=("profit_units","sum")
+            wins=("result", lambda x: (x == "WIN").sum()),
+            units=("profit_units", "sum"),
         ).reset_index()
         colors = ["#22c55e" if u > 0 else "#ef4444" for u in mo["units"]]
-        f2 = go.Figure(go.Bar(x=mo["month"], y=mo["units"],
-                              marker_color=colors, marker_line_width=0))
-        f2.add_hline(y=0, line_color="#333340", line_width=1)
-        f2.update_layout(height=200, **_CHART)
+        f2 = go.Figure(go.Bar(
+            x=mo["month"], y=mo["units"],
+            marker_color=colors, marker_line_width=0,
+        ))
+        f2.add_hline(y=0, line_color="#1e2d42", line_width=1)
+        f2.update_layout(height=190, **_CHART)
         st.plotly_chart(f2, use_container_width=True)
 
     with cr2:
         st.markdown("<div class='sh'>Edge distribution</div>", unsafe_allow_html=True)
         f3 = go.Figure()
-        for result, color in [("WIN","#22c55e"),("LOSS","#ef4444")]:
-            sub = bets[bets["result"]==result]
+        for result, color in [("WIN", "#22c55e"), ("LOSS", "#ef4444")]:
+            sub = bets[bets["result"] == result]
             if not sub.empty and "edge" in sub.columns:
-                f3.add_histogram(x=sub["edge"], name=result,
-                                 marker_color=color, opacity=0.7,
-                                 xbins=dict(size=0.01))
-        f3.update_layout(barmode="overlay", height=200, **_CHART)
+                f3.add_histogram(
+                    x=sub["edge"], name=result,
+                    marker_color=color, opacity=0.7,
+                    xbins=dict(size=0.01),
+                )
+        f3.update_layout(barmode="overlay", height=190, **_CHART)
         st.plotly_chart(f3, use_container_width=True)
 
-def _bet_log(bets, run_line=False):
+
+def _bet_log_strategy(bets, log_type, pred_col=None, pred_label=None):
+    """Generic bet log — handles ml / spread / totals with one function."""
     if bets.empty:
         return
     st.markdown("<div class='sh'>Bet log</div>", unsafe_allow_html=True)
-    if run_line:
+
+    if log_type == "ml":
+        cols_map = {
+            "predict_date": "Date", "bet_team": "Team",
+            "edge": "Edge", "line": "Line",
+            "kelly_stake": "Kelly", "result": "Result", "profit_units": "Units",
+        }
+    elif log_type == "spread":
         cols_map = {
             "predict_date": "Date", "bet_team": "Team",
             "spread": "Run line", "pred_margin": "Pred margin",
             "edge": "Edge", "line": "Line",
-            "kelly_stake": "Kelly", "result": "Result", "profit_units": "Units"
+            "kelly_stake": "Kelly", "result": "Result", "profit_units": "Units",
         }
-    else:
+    else:  # totals
         cols_map = {
-            "predict_date": "Date", "bet_team": "Team",
-            "edge": "Edge", "line": "Line",
-            "kelly_stake": "Kelly", "result": "Result", "profit_units": "Units"
+            "predict_date": "Date", "home_team": "Home", "away_team": "Away",
+            "bet_side": "Side", "total_line": "Line", "pred_total": pred_label or "Pred",
+            "edge": "Edge", "line": "Odds",
+            "kelly_stake": "Kelly", "result": "Result", "profit_units": "Units",
         }
 
     avail = {k: v for k, v in cols_map.items() if k in bets.columns}
     log   = bets[list(avail.keys())].copy().rename(columns=avail)
     log   = log.sort_values("Date", ascending=False)
 
-    if "Edge" in log.columns:
-        log["Edge"] = log["Edge"].map(lambda x: f"{x:+.1%}" if pd.notna(x) else "—")
-    if "Kelly" in log.columns:
-        log["Kelly"] = log["Kelly"].map(lambda x: f"{x:.1%}" if pd.notna(x) else "—")
-    if "Units" in log.columns:
-        log["Units"] = log["Units"].map(lambda x: f"{x:+.3f}" if pd.notna(x) else "—")
-    if "Line" in log.columns:
-        log["Line"] = log["Line"].map(_fmt)
-    if "Run line" in log.columns:
-        log["Run line"] = log["Run line"].map(lambda x: f"{x:+.1f}" if pd.notna(x) else "—")
-    if "Pred margin" in log.columns:
-        log["Pred margin"] = log["Pred margin"].map(lambda x: f"{x:+.1f}" if pd.notna(x) else "—")
+    for col, fmt in [
+        ("Edge",        lambda x: f"{x:+.1%}" if pd.notna(x) else "—"),
+        ("Kelly",       lambda x: f"{x:.1%}"  if pd.notna(x) else "—"),
+        ("Units",       lambda x: f"{x:+.3f}" if pd.notna(x) else "—"),
+        ("Line",        _fmt),
+        ("Odds",        _fmt),
+        ("Run line",    lambda x: f"{x:+.1f}" if pd.notna(x) else "—"),
+        ("Pred margin", lambda x: f"{x:+.1f}" if pd.notna(x) else "—"),
+    ]:
+        if col in log.columns:
+            log[col] = log[col].map(fmt)
 
-    st.dataframe(log, use_container_width=True, height=360, hide_index=True)
-
-
-def _bet_log_totals(bets):
-    if bets.empty:
-        return
-    st.markdown("<div class='sh'>Bet log</div>", unsafe_allow_html=True)
-    cols_map = {
-        "predict_date": "Date", "home_team": "Home", "away_team": "Away",
-        "bet_side": "Side", "total_line": "Line", "pred_total": "Pred total",
-        "edge": "Edge", "line": "Odds",
-        "kelly_stake": "Kelly", "result": "Result", "profit_units": "Units"
-    }
-    avail = {k: v for k, v in cols_map.items() if k in bets.columns}
-    log   = bets[list(avail.keys())].copy().rename(columns=avail)
-    log   = log.sort_values("Date", ascending=False)
+    pred_display = pred_label or "Pred"
+    if pred_display in log.columns:
+        log[pred_display] = log[pred_display].map(
+            lambda x: f"{x:.1f}" if pd.notna(x) else "—"
+        )
 
     if "Side" in log.columns:
         log["Side"] = log["Side"].str.upper()
-    if "Edge" in log.columns:
-        log["Edge"] = log["Edge"].map(lambda x: f"{x:+.1%}" if pd.notna(x) else "—")
-    if "Kelly" in log.columns:
-        log["Kelly"] = log["Kelly"].map(lambda x: f"{x:.1%}" if pd.notna(x) else "—")
-    if "Units" in log.columns:
-        log["Units"] = log["Units"].map(lambda x: f"{x:+.3f}" if pd.notna(x) else "—")
-    if "Odds" in log.columns:
-        log["Odds"] = log["Odds"].map(_fmt)
-    if "Pred total" in log.columns:
-        log["Pred total"] = log["Pred total"].map(lambda x: f"{x:.1f}" if pd.notna(x) else "—")
 
-    st.dataframe(log, use_container_width=True, height=360, hide_index=True)
+    st.dataframe(log, use_container_width=True, height=340, hide_index=True)
+
+
+def _render_strategy_section(cfg, bets):
+    """Render one strategy inside its expander."""
+    color    = cfg["color"]
+    log_type = cfg["log_type"]
+
+    if bets.empty:
+        st.info(f"No resolved {cfg['label']} bets yet. Results populate automatically after games finish.")
+        return
+
+    wins  = (bets["result"] == "WIN").sum()
+    total = len(bets)
+    units = bets["profit_units"].sum()
+    rec   = f"{wins}W–{total-wins}L · {units:+.2f}u"
+
+    st.markdown(
+        f"<div class='strat-hdr'>"
+        f"<span class='strat-dot' style='background:{color}'></span>"
+        f"<span class='strat-name'>{cfg['label']}</span>"
+        f"<span class='strat-rec'>{rec}</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    _summary_metrics(bets)
+    _cumulative_chart(bets, color)
+    _monthly_and_edge(bets)
+    _bet_log_strategy(
+        bets, log_type=log_type,
+        pred_col=cfg.get("pred_col"), pred_label=cfg.get("pred_label"),
+    )
 
 
 def render():
     st.markdown(_CSS, unsafe_allow_html=True)
 
-    ml_bets     = _load("SELECT * FROM mlb_bet_log WHERE result IN ('WIN','LOSS') ORDER BY predict_date ASC")
-    rl_bets     = _load("SELECT * FROM mlb_ats_bet_log WHERE result IN ('WIN','LOSS') ORDER BY predict_date ASC")
-    totals_bets = _load("SELECT * FROM mlb_totals_bet_log WHERE result IN ('WIN','LOSS') ORDER BY predict_date ASC")
+    # Load all bet logs
+    data = {}
+    for cfg in MLB_ROI_CONFIGS:
+        data[cfg["key"]] = _load(
+            f"SELECT * FROM {cfg['table']} WHERE result IN ('WIN','LOSS') ORDER BY predict_date ASC"
+        )
 
-    # ── Combined header ────────────────────────────────────────────────────────
-    st.markdown("<div class='sh'>⚾ MLB ROI Tracker</div>", unsafe_allow_html=True)
-
-    all_units = (
-        (ml_bets["profit_units"].sum() if not ml_bets.empty else 0) +
-        (rl_bets["profit_units"].sum() if not rl_bets.empty else 0) +
-        (totals_bets["profit_units"].sum() if not totals_bets.empty else 0)
+    # Aggregate totals
+    all_bets  = sum(len(data[c["key"]]) for c in MLB_ROI_CONFIGS)
+    all_units = sum(
+        data[c["key"]]["profit_units"].sum() if not data[c["key"]].empty else 0
+        for c in MLB_ROI_CONFIGS
     )
-    all_bets = len(ml_bets) + len(rl_bets) + len(totals_bets)
-    all_wins = (
-        ((ml_bets["result"]=="WIN").sum() if not ml_bets.empty else 0) +
-        ((rl_bets["result"]=="WIN").sum() if not rl_bets.empty else 0) +
-        ((totals_bets["result"]=="WIN").sum() if not totals_bets.empty else 0)
+    all_wins  = sum(
+        (data[c["key"]]["result"] == "WIN").sum() if not data[c["key"]].empty else 0
+        for c in MLB_ROI_CONFIGS
     )
 
+    # Page header
+    st.markdown(
+        "<div class='roi-header'>"
+        "<div><div class='roi-title'>⚾ MLB ROI Tracker</div>"
+        "<div class='roi-subtitle'>Resolved bets across all 3 active strategies</div></div>"
+        "<div class='roi-badge'>3 strategies live</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Summary strip
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total bets (all types)", all_bets)
-    c2.metric("Combined win rate", f"{all_wins/all_bets:.1%}" if all_bets > 0 else "—")
+    c1.metric("Total bets",         all_bets)
+    c2.metric("Combined win rate",  f"{all_wins/all_bets:.1%}" if all_bets > 0 else "—")
     c3.metric("Combined units P&L", f"{all_units:+.3f}")
-    c4.metric("Strategies live", "3  (ML + Run Line + Totals)")
+    c4.metric("Active strategies",  len(MLB_ROI_CONFIGS))
 
-    # Combined cumulative chart
-    if not ml_bets.empty or not rl_bets.empty or not totals_bets.empty:
+    # Combined P&L curve
+    has_any = any(not data[c["key"]].empty for c in MLB_ROI_CONFIGS)
+    if has_any:
         st.markdown("<div class='sh'>Combined P&L curve</div>", unsafe_allow_html=True)
         fig = go.Figure()
-        for df, label, color in [
-            (ml_bets,     "Moneyline", "#6366f1"),
-            (rl_bets,     "Run Line",  "#22c55e"),
-            (totals_bets, "Totals",    "#f59e0b"),
-        ]:
+        for cfg in MLB_ROI_CONFIGS:
+            df = data[cfg["key"]]
             if df.empty:
                 continue
             d = df.copy()
             d["predict_date"] = pd.to_datetime(d["predict_date"])
             d["cumulative"]   = d["profit_units"].cumsum()
-            fig.add_scatter(x=d["predict_date"], y=d["cumulative"],
-                            mode="lines", name=label,
-                            line=dict(color=color, width=2))
-        fig.add_hline(y=0, line_color="#333340", line_width=1)
+            fig.add_scatter(
+                x=d["predict_date"], y=d["cumulative"],
+                mode="lines", name=cfg["label"],
+                line=dict(color=cfg["color"], width=2),
+            )
+        fig.add_hline(y=0, line_color="#1e2d42", line_width=1)
         fig.update_layout(height=260, **_CHART)
         st.plotly_chart(fig, use_container_width=True)
 
-    # ── Moneyline section ──────────────────────────────────────────────────────
-    st.markdown("<div class='sh'>Moneyline performance</div>", unsafe_allow_html=True)
-    if ml_bets.empty:
-        st.info("No resolved moneyline bets yet. Results populate automatically after games finish.")
-    else:
-        _summary_metrics(ml_bets, "moneyline")
-        _cumulative_chart(ml_bets, "#6366f1")
-        _monthly_and_edge(ml_bets)
-        _bet_log(ml_bets, run_line=False)
+    # Strategy breakdown — one expander per strategy
+    st.markdown("<div class='sh'>Strategy breakdown</div>", unsafe_allow_html=True)
 
-    # ── Run Line section ───────────────────────────────────────────────────────
-    st.markdown("<div class='sh'>Run Line (ATS) performance</div>", unsafe_allow_html=True)
-    if rl_bets.empty:
-        st.info("No resolved run line bets yet. Results populate automatically after games finish.")
-    else:
-        _summary_metrics(rl_bets, "run line")
-        _cumulative_chart(rl_bets, "#22c55e")
-        _monthly_and_edge(rl_bets)
-        _bet_log(rl_bets, run_line=True)
-
-    # ── Totals section ─────────────────────────────────────────────────────────
-    st.markdown("<div class='sh'>Totals (Over/Under) performance</div>", unsafe_allow_html=True)
-    if totals_bets.empty:
-        st.info("No resolved totals bets yet. Results populate automatically after games finish.")
-    else:
-        _summary_metrics(totals_bets, "totals")
-        _cumulative_chart(totals_bets, "#f59e0b")
-        _monthly_and_edge(totals_bets)
-        _bet_log_totals(totals_bets)
+    for i, cfg in enumerate(MLB_ROI_CONFIGS):
+        bets      = data[cfg["key"]]
+        n         = len(bets)
+        units_sum = bets["profit_units"].sum() if not bets.empty else 0
+        wins_n    = (bets["result"] == "WIN").sum() if not bets.empty else 0
+        label_exp = (
+            f"{cfg['label']}  ·  {wins_n}W–{n-wins_n}L  ·  {units_sum:+.2f}u"
+            if n > 0 else f"{cfg['label']}  ·  no data yet"
+        )
+        with st.expander(label_exp, expanded=(i == 0)):
+            _render_strategy_section(cfg, bets)

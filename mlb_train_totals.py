@@ -12,7 +12,9 @@ import json
 from xgboost import XGBRegressor
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from mlb_config import MLB_DB_PATH
+from mlb_config import MLB_DB_PATH, WEIGHT_HALF_LIFE
+from datetime import date as _date
+_CURRENT_SEASON = str(_date.today().year)
 
 # Totals-focused features — scoring rates, pitching, park effects
 # Drops win-rate/differential features that capture team quality, not run volume
@@ -70,16 +72,23 @@ def load_data(conn):
     return df, available
 
 
+def _time_weights(dates):
+    today    = pd.Timestamp.today().normalize()
+    days_old = (today - pd.to_datetime(dates)).dt.days.clip(lower=0).values
+    return np.exp(-np.log(2) / WEIGHT_HALF_LIFE * days_old)
+
+
 def split_by_season(df):
     if "season" not in df.columns:
         n = int(len(df) * 0.8)
         return df.iloc[:n].copy(), df.iloc[n:].copy()
-    train = df[df["season"].isin(["2023", "2024"])].copy()
-    test  = df[df["season"] == "2025"].copy()
+    seasons = sorted(s for s in df["season"].dropna().unique() if s != _CURRENT_SEASON)
+    train = df[df["season"].isin(seasons)].copy()
+    test  = df[df["season"] == _CURRENT_SEASON].copy()
     return train, test
 
 
-def train_model(X_train, y_train):
+def train_model(X_train, y_train, sample_weight=None):
     print("  Training XGBoost regressor...")
 
     model = XGBRegressor(
@@ -101,7 +110,7 @@ def train_model(X_train, y_train):
                               scoring="neg_root_mean_squared_error", n_jobs=-1)
     print(f"  CV RMSE: {-cv_rmse.mean():.2f} +/- {cv_rmse.std():.2f} runs")
 
-    model.fit(X_train, y_train)
+    model.fit(X_train, y_train, sample_weight=sample_weight)
     return model
 
 
@@ -130,7 +139,7 @@ def evaluate(model, X_test, y_test, feature_cols):
     except Exception:
         pass
 
-    return rmse, preds
+    return rmse, preds, r2
 
 
 if __name__ == "__main__":
@@ -157,15 +166,25 @@ if __name__ == "__main__":
     y_train = train_df[TARGET]
     X_test  = test_df[feature_cols]
     y_test  = test_df[TARGET]
+    w_train = _time_weights(train_df["game_date"])
+    print(f"  Weight range   : {w_train.min():.3f} – {w_train.max():.3f} (decay half-life={WEIGHT_HALF_LIFE}d)")
 
-    model = train_model(X_train, y_train)
+    model = train_model(X_train, y_train, sample_weight=w_train)
 
     if not test_df.empty:
-        rmse, _ = evaluate(model, X_test, y_test, feature_cols)
+        rmse, _, r2 = evaluate(model, X_test, y_test, feature_cols)
     else:
         train_preds = model.predict(X_train)
         rmse = mean_squared_error(y_train, train_preds) ** 0.5
+        r2   = 0.0
         print(f"  No test data -- using train RMSE as sigma: {rmse:.2f}")
+
+    # Shrinkage skill factor: how much to trust the model's deviation from the
+    # market line. R2<=0 means no out-of-sample skill -> shrink fully to the line
+    # (no manufactured edges). Auto-reactivates as features push R2 positive.
+    skill = max(0.0, float(r2))
+    print(f"  Skill factor (max(0,R2)) = {skill:.3f}  "
+          f"(0 => predictions collapse to market line, no bets)")
 
     print(f"\n-- Saving model ─────────────────────────────────────────")
     with open("mlb_totals_model.pkl", "wb") as f:
@@ -173,7 +192,7 @@ if __name__ == "__main__":
     with open("mlb_totals_features.json", "w") as f:
         json.dump(feature_cols, f)
     with open("mlb_totals_model_std.json", "w") as f:
-        json.dump({"rmse": float(rmse)}, f)
+        json.dump({"rmse": float(rmse), "skill": skill}, f)
 
     print(f"  Saved mlb_totals_model.pkl, mlb_totals_features.json, mlb_totals_model_std.json")
     print(f"  sigma (RMSE) = {rmse:.2f} runs -- used in P(over/under) Normal CDF")

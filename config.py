@@ -14,10 +14,15 @@ DB_PATH = "nba.db"
 SEASONS = ["2023-24", "2024-25", "2025-26"]
 
 # Minimum edge (model prob - implied book prob) to flag as a value bet
-MIN_EDGE = 0.03        # 3% edge required
+MIN_EDGE = 0.05        # 5% edge required — filters noise below typical vig
 
 # Kelly fraction — use 1/4 Kelly for conservative sizing
 KELLY_FRACTION = 0.25
+
+# Training sample weights — exponential time decay.
+# Games WEIGHT_HALF_LIFE days old get half the weight of today's games.
+# 365 = one full season half-life (recent form > historical baseline)
+WEIGHT_HALF_LIFE = 365
 
 # Rolling window sizes for feature engineering
 ROLLING_SHORT = 5      # last 5 games

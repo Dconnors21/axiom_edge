@@ -12,7 +12,9 @@ import json
 from xgboost import XGBRegressor
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from mlb_config import MLB_DB_PATH, FEATURE_COLS
+from mlb_config import MLB_DB_PATH, FEATURE_COLS, WEIGHT_HALF_LIFE
+from datetime import date as _date
+_CURRENT_SEASON = str(_date.today().year)
 
 TARGET = "home_run_margin"
 
@@ -49,13 +51,19 @@ def load_data(conn):
     return df, available
 
 
+def _time_weights(dates):
+    today    = pd.Timestamp.today().normalize()
+    days_old = (today - pd.to_datetime(dates)).dt.days.clip(lower=0).values
+    return np.exp(-np.log(2) / WEIGHT_HALF_LIFE * days_old)
+
+
 def split(df):
     train = df[df["season"].isin(["2023", "2024", "2025"])].copy()
-    test  = df[df["season"] == "2026"].copy()
+    test  = df[df["season"] == _CURRENT_SEASON].copy()
     return train, test
 
 
-def train_model(X_train, y_train):
+def train_model(X_train, y_train, sample_weight=None):
     print("  Training XGBoost regressor...")
     model = XGBRegressor(
         n_estimators=400,
@@ -74,7 +82,7 @@ def train_model(X_train, y_train):
     cv_rmse = cross_val_score(model, X_train, y_train, cv=5,
                               scoring="neg_root_mean_squared_error", n_jobs=-1)
     print(f"  CV RMSE: {-cv_rmse.mean():.2f} ± {cv_rmse.std():.2f} runs")
-    model.fit(X_train, y_train)
+    model.fit(X_train, y_train, sample_weight=sample_weight)
     return model
 
 
@@ -126,8 +134,10 @@ if __name__ == "__main__":
 
     X_train = train_df[feature_cols]
     y_train = train_df[TARGET]
+    w_train = _time_weights(train_df["game_date"])
+    print(f"  Weight range   : {w_train.min():.3f} – {w_train.max():.3f} (decay half-life={WEIGHT_HALF_LIFE}d)")
 
-    model = train_model(X_train, y_train)
+    model = train_model(X_train, y_train, sample_weight=w_train)
 
     if not test_df.empty:
         rmse, _ = evaluate(model, test_df[feature_cols], test_df[TARGET], feature_cols)

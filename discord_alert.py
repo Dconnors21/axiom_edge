@@ -141,6 +141,161 @@ def _get_best_ats(spread_preds: pd.DataFrame, min_edge: float):
     return sorted(candidates, key=lambda x: x["edge"], reverse=True)[0]
 
 
+def _get_best_threes_prop(threes_preds: pd.DataFrame, min_edge: float):
+    if threes_preds.empty:
+        return None
+    candidates = []
+    for _, g in threes_preds.iterrows():
+        for side in ["over", "under"]:
+            edge  = float(g.get(f"{side}_edge", 0))
+            prob  = float(g.get(f"{side}_prob", 0))
+            kelly = float(g.get(f"{side}_kelly", 0))
+            price = g.get(f"{side}_price")
+            val   = int(g.get(f"{side}_value", 0))
+            if val != 1 or edge < min_edge or kelly < 0.005 or price is None:
+                continue
+            candidates.append({
+                "side":          side,
+                "player_name":   g["player_name"],
+                "home_team":     g["home_team"],
+                "away_team":     g["away_team"],
+                "bookmaker":     str(g.get("bookmaker", "")).upper(),
+                "line":          g.get("line"),
+                "pred_threes":   float(g.get("pred_threes", 0)),
+                "ou_prob":       prob,
+                "edge":          edge,
+                "kelly":         kelly,
+                "price":         price,
+            })
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda x: x["edge"], reverse=True)[0]
+
+
+def _get_best_stl_prop(stl_preds: pd.DataFrame, min_edge: float):
+    if stl_preds.empty:
+        return None
+    candidates = []
+    for _, g in stl_preds.iterrows():
+        for side in ["over", "under"]:
+            edge  = float(g.get(f"{side}_edge", 0))
+            prob  = float(g.get(f"{side}_prob", 0))
+            kelly = float(g.get(f"{side}_kelly", 0))
+            price = g.get(f"{side}_price")
+            val   = int(g.get(f"{side}_value", 0))
+            if val != 1 or edge < min_edge or kelly < 0.005 or price is None:
+                continue
+            candidates.append({
+                "side":        side,
+                "player_name": g["player_name"],
+                "home_team":   g["home_team"],
+                "away_team":   g["away_team"],
+                "bookmaker":   str(g.get("bookmaker", "")).upper(),
+                "line":        g.get("line"),
+                "pred_stl":    float(g.get("pred_stl", 0)),
+                "ou_prob":     prob,
+                "edge":        edge,
+                "kelly":       kelly,
+                "price":       price,
+            })
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda x: x["edge"], reverse=True)[0]
+
+
+def _get_best_blk_prop(blk_preds: pd.DataFrame, min_edge: float):
+    if blk_preds.empty:
+        return None
+    candidates = []
+    for _, g in blk_preds.iterrows():
+        for side in ["over", "under"]:
+            edge  = float(g.get(f"{side}_edge", 0))
+            prob  = float(g.get(f"{side}_prob", 0))
+            kelly = float(g.get(f"{side}_kelly", 0))
+            price = g.get(f"{side}_price")
+            val   = int(g.get(f"{side}_value", 0))
+            if val != 1 or edge < min_edge or kelly < 0.005 or price is None:
+                continue
+            candidates.append({
+                "side":        side,
+                "player_name": g["player_name"],
+                "home_team":   g["home_team"],
+                "away_team":   g["away_team"],
+                "bookmaker":   str(g.get("bookmaker", "")).upper(),
+                "line":        g.get("line"),
+                "pred_blk":    float(g.get("pred_blk", 0)),
+                "ou_prob":     prob,
+                "edge":        edge,
+                "kelly":       kelly,
+                "price":       price,
+            })
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda x: x["edge"], reverse=True)[0]
+
+
+def _get_best_ast_prop(ast_preds: pd.DataFrame, min_edge: float):
+    if ast_preds.empty:
+        return None
+    candidates = []
+    for _, g in ast_preds.iterrows():
+        for side in ["over", "under"]:
+            edge  = float(g.get(f"{side}_edge", 0))
+            prob  = float(g.get(f"{side}_prob", 0))
+            kelly = float(g.get(f"{side}_kelly", 0))
+            price = g.get(f"{side}_price")
+            val   = int(g.get(f"{side}_value", 0))
+            if val != 1 or edge < min_edge or kelly < 0.005 or price is None:
+                continue
+            candidates.append({
+                "side":         side,
+                "player_name":  g["player_name"],
+                "home_team":    g["home_team"],
+                "away_team":    g["away_team"],
+                "bookmaker":    str(g.get("bookmaker", "")).upper(),
+                "line":         g.get("line"),
+                "pred_ast":     float(g.get("pred_ast", 0)),
+                "ou_prob":      prob,
+                "edge":         edge,
+                "kelly":        kelly,
+                "price":        price,
+            })
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda x: x["edge"], reverse=True)[0]
+
+
+def _get_best_reb_prop(reb_preds: pd.DataFrame, min_edge: float):
+    if reb_preds.empty:
+        return None
+    candidates = []
+    for _, g in reb_preds.iterrows():
+        for side in ["over", "under"]:
+            edge  = float(g.get(f"{side}_edge", 0))
+            prob  = float(g.get(f"{side}_prob", 0))
+            kelly = float(g.get(f"{side}_kelly", 0))
+            price = g.get(f"{side}_price")
+            val   = int(g.get(f"{side}_value", 0))
+            if val != 1 or edge < min_edge or kelly < 0.005 or price is None:
+                continue
+            candidates.append({
+                "side":         side,
+                "player_name":  g["player_name"],
+                "home_team":    g["home_team"],
+                "away_team":    g["away_team"],
+                "bookmaker":    str(g.get("bookmaker", "")).upper(),
+                "line":         g.get("line"),
+                "pred_reb":     float(g.get("pred_reb", 0)),
+                "ou_prob":      prob,
+                "edge":         edge,
+                "kelly":        kelly,
+                "price":        price,
+            })
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda x: x["edge"], reverse=True)[0]
+
+
 def _get_best_prop(props_preds: pd.DataFrame, min_edge: float):
     if props_preds.empty:
         return None
@@ -216,12 +371,44 @@ def _build_nba_embed(today: str) -> dict:
     props_preds  = _load(NBA_DB,
                          "SELECT * FROM props_predictions WHERE predict_date=? ORDER BY over_edge DESC",
                          params=(today,))
+    reb_preds    = _load(NBA_DB,
+                         "SELECT * FROM props_reb_predictions WHERE predict_date=? ORDER BY over_edge DESC",
+                         params=(today,))
+    ast_preds    = _load(NBA_DB,
+                         "SELECT * FROM props_ast_predictions WHERE predict_date=? ORDER BY over_edge DESC",
+                         params=(today,))
+    threes_preds = _load(NBA_DB,
+                         "SELECT * FROM props_threes_predictions WHERE predict_date=? ORDER BY over_edge DESC",
+                         params=(today,))
+    stl_preds    = _load(NBA_DB,
+                         "SELECT * FROM props_stl_predictions WHERE predict_date=? ORDER BY over_edge DESC",
+                         params=(today,))
+    blk_preds    = _load(NBA_DB,
+                         "SELECT * FROM props_blk_predictions WHERE predict_date=? ORDER BY over_edge DESC",
+                         params=(today,))
     best         = _get_best(preds, NBA_MIN_EDGE)
     ats_best     = _get_best_ats(spread_preds, NBA_MIN_EDGE)
     totals_best  = _get_best_total(totals_preds, NBA_MIN_EDGE)
     props_best   = _get_best_prop(props_preds, 0.08)
+    reb_best     = _get_best_reb_prop(reb_preds, 0.08)
+    ast_best     = _get_best_ast_prop(ast_preds, 0.08)
+    threes_best  = _get_best_threes_prop(threes_preds, 0.08)
+    stl_best     = _get_best_stl_prop(stl_preds, 0.08)
+    blk_best     = _get_best_blk_prop(blk_preds, 0.08)
     val_count = int(((preds["home_value"] == 1) | (preds["away_value"] == 1)).sum()) \
                 if not preds.empty else 0
+    props_val = int(((props_preds["over_value"]==1)|(props_preds["under_value"]==1)).sum()) \
+                if not props_preds.empty else 0
+    reb_val   = int(((reb_preds["over_value"]==1)|(reb_preds["under_value"]==1)).sum()) \
+                if not reb_preds.empty else 0
+    ast_val    = int(((ast_preds["over_value"]==1)|(ast_preds["under_value"]==1)).sum()) \
+                 if not ast_preds.empty else 0
+    threes_val = int(((threes_preds["over_value"]==1)|(threes_preds["under_value"]==1)).sum()) \
+                 if not threes_preds.empty else 0
+    stl_val    = int(((stl_preds["over_value"]==1)|(stl_preds["under_value"]==1)).sum()) \
+                 if not stl_preds.empty else 0
+    blk_val    = int(((blk_preds["over_value"]==1)|(blk_preds["under_value"]==1)).sum()) \
+                 if not blk_preds.empty else 0
     game_count = len(preds)
 
     if best:
@@ -272,7 +459,7 @@ def _build_nba_embed(today: str) -> dict:
             away = props_best["away_team"].split()[-1]
             home = props_best["home_team"].split()[-1]
             fields.append({
-                "name": "🎲 Props Pick",
+                "name": "🎲 Props Pick (Points)",
                 "value": (
                     f"**{props_best['player_name']} {side_label} {props_best['line']}** `{_fmt_price(props_best['price'])}`  "
                     f"({away} @ {home})  "
@@ -282,10 +469,93 @@ def _build_nba_embed(today: str) -> dict:
                 ),
                 "inline": False,
             })
+        if reb_best:
+            side_label = "OVER" if reb_best["side"] == "over" else "UNDER"
+            away = reb_best["away_team"].split()[-1]
+            home = reb_best["home_team"].split()[-1]
+            fields.append({
+                "name": "🏀 Props Pick (Rebounds)",
+                "value": (
+                    f"**{reb_best['player_name']} {side_label} {reb_best['line']}** `{_fmt_price(reb_best['price'])}`  "
+                    f"({away} @ {home})  "
+                    f"P(hit): {reb_best['ou_prob']:.1%}  "
+                    f"Edge: **{reb_best['edge']:+.1%}**  "
+                    f"Pred: {reb_best['pred_reb']:.1f} reb"
+                ),
+                "inline": False,
+            })
+        if ast_best:
+            side_label = "OVER" if ast_best["side"] == "over" else "UNDER"
+            away = ast_best["away_team"].split()[-1]
+            home = ast_best["home_team"].split()[-1]
+            fields.append({
+                "name": "🎯 Props Pick (Assists)",
+                "value": (
+                    f"**{ast_best['player_name']} {side_label} {ast_best['line']}** `{_fmt_price(ast_best['price'])}`  "
+                    f"({away} @ {home})  "
+                    f"P(hit): {ast_best['ou_prob']:.1%}  "
+                    f"Edge: **{ast_best['edge']:+.1%}**  "
+                    f"Pred: {ast_best['pred_ast']:.1f} ast"
+                ),
+                "inline": False,
+            })
+        if threes_best:
+            side_label = "OVER" if threes_best["side"] == "over" else "UNDER"
+            away = threes_best["away_team"].split()[-1]
+            home = threes_best["home_team"].split()[-1]
+            fields.append({
+                "name": "3️⃣ Props Pick (3-Pointers)",
+                "value": (
+                    f"**{threes_best['player_name']} {side_label} {threes_best['line']}** `{_fmt_price(threes_best['price'])}`  "
+                    f"({away} @ {home})  "
+                    f"P(hit): {threes_best['ou_prob']:.1%}  "
+                    f"Edge: **{threes_best['edge']:+.1%}**  "
+                    f"Pred: {threes_best['pred_threes']:.1f} 3PM"
+                ),
+                "inline": False,
+            })
+        if stl_best:
+            side_label = "OVER" if stl_best["side"] == "over" else "UNDER"
+            away = stl_best["away_team"].split()[-1]
+            home = stl_best["home_team"].split()[-1]
+            fields.append({
+                "name": "🔒 Props Pick (Steals)",
+                "value": (
+                    f"**{stl_best['player_name']} {side_label} {stl_best['line']}** `{_fmt_price(stl_best['price'])}`  "
+                    f"({away} @ {home})  "
+                    f"P(hit): {stl_best['ou_prob']:.1%}  "
+                    f"Edge: **{stl_best['edge']:+.1%}**  "
+                    f"Pred: {stl_best['pred_stl']:.1f} stl"
+                ),
+                "inline": False,
+            })
+        if blk_best:
+            side_label = "OVER" if blk_best["side"] == "over" else "UNDER"
+            away = blk_best["away_team"].split()[-1]
+            home = blk_best["home_team"].split()[-1]
+            fields.append({
+                "name": "🛡️ Props Pick (Blocks)",
+                "value": (
+                    f"**{blk_best['player_name']} {side_label} {blk_best['line']}** `{_fmt_price(blk_best['price'])}`  "
+                    f"({away} @ {home})  "
+                    f"P(hit): {blk_best['ou_prob']:.1%}  "
+                    f"Edge: **{blk_best['edge']:+.1%}**  "
+                    f"Pred: {blk_best['pred_blk']:.1f} blk"
+                ),
+                "inline": False,
+            })
         return {
             "title":       "🏀 NBA — Best Bet of the Day",
             "color":       NBA_COLOR,
-            "description": f"{game_count} games today · **{val_count} value bet{'s' if val_count != 1 else ''} found**",
+            "description": (
+                f"{game_count} games today · **{val_count} ML/ATS value bet{'s' if val_count != 1 else ''}**"
+                + (f" · {props_val} pts prop{'s' if props_val != 1 else ''}" if props_val else "")
+                + (f" · {reb_val} reb prop{'s' if reb_val != 1 else ''}" if reb_val else "")
+                + (f" · {ast_val} ast prop{'s' if ast_val != 1 else ''}" if ast_val else "")
+                + (f" · {threes_val} 3PM prop{'s' if threes_val != 1 else ''}" if threes_val else "")
+                + (f" · {stl_val} stl prop{'s' if stl_val != 1 else ''}" if stl_val else "")
+                + (f" · {blk_val} blk prop{'s' if blk_val != 1 else ''}" if blk_val else "")
+            ),
             "fields":      fields,
             "footer":      {"text": f"AXIOM Edge · {today}"},
         }

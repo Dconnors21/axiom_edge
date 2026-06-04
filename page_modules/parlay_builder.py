@@ -14,23 +14,31 @@ from datetime import date
 
 _CSS = """
 <style>
-.block-container{padding-top:1.5rem;padding-bottom:2rem;max-width:1200px}
-[data-testid="metric-container"]{background:#16161a;border:1px solid #222228;border-radius:10px;padding:1rem 1.25rem}
-[data-testid="metric-container"] label{color:#6b6b78!important;font-size:11px!important;letter-spacing:.06em;text-transform:uppercase}
-[data-testid="stMetricValue"]{color:#e8e8ec!important;font-size:22px!important;font-weight:600!important}
-.sh{font-size:11px;font-weight:600;letter-spacing:.1em;color:#44444f;text-transform:uppercase;margin:1.5rem 0 .75rem;padding-bottom:8px;border-bottom:1px solid #1e1e24}
-.leg-card{background:#16161a;border:1px solid #222228;border-radius:10px;padding:1rem 1.25rem;margin-bottom:8px}
+.block-container{padding-top:0;padding-bottom:2rem;max-width:1600px;padding-left:2rem;padding-right:2rem}
+[data-testid="metric-container"]{background:#131d2e;border:1px solid #1e2d42;border-radius:10px;padding:.875rem 1.25rem}
+[data-testid="metric-container"] label{color:#8090a8!important;font-size:11px!important;letter-spacing:.06em;text-transform:uppercase}
+[data-testid="stMetricValue"]{color:#f0f2f5!important;font-size:22px!important;font-weight:700!important}
+.sh{font-size:11px;font-weight:700;letter-spacing:.1em;color:#8090a8;text-transform:uppercase;margin:1.25rem 0 .75rem;padding-bottom:7px;border-bottom:1px solid #1e2d42}
+.leg-card{background:#131d2e;border:1px solid #1e2d42;border-radius:10px;padding:1rem 1.25rem;margin-bottom:8px}
 .leg-card.value{border-color:#1a3a1a;border-left:3px solid #22c55e}
-.leg-card.no-value{border-left:3px solid #333340}
+.leg-card.no-value{border-left:3px solid #1e2d42}
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;letter-spacing:.04em}
 .bg{background:#0d2a0d;color:#22c55e;border:1px solid #1a4a1a}
 .br{background:#2a0d0d;color:#ef4444;border:1px solid #4a1a1a}
-.bn{background:#1a1a20;color:#6b6b78;border:1px solid #2a2a32}
+.bn{background:#0f1828;color:#8090a8;border:1px solid #1e2d42}
 .by{background:#2a1f0d;color:#f59e0b;border:1px solid #4a380d}
-.parlay-summary{background:#111118;border:1px solid #222228;border-radius:14px;padding:1.75rem 2rem;margin-bottom:1.5rem}
+.parlay-summary{background:#0f1828;border:1px solid #1e2d42;border-radius:12px;padding:1.75rem 2rem;margin-bottom:1.5rem}
 .big-prob{font-size:48px;font-weight:700;letter-spacing:-1px;line-height:1}
-.stat-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1a1a20;font-size:13px}
+.stat-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1a2840;font-size:13px}
 .stat-row:last-child{border-bottom:none}
+.page-header{background:linear-gradient(135deg,#0d1a2e 0%,#131d2e 60%,#0f1828 100%);border:1px solid #1e2d42;border-radius:14px;padding:1.75rem 2rem;margin-bottom:1.5rem}
+.ph-tag{display:inline-flex;align-items:center;gap:6px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.25);border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#6366f1;text-transform:uppercase;margin-bottom:.875rem}
+.ph-title{font-size:28px;font-weight:800;color:#f0f2f5;letter-spacing:-.5px;margin-bottom:4px}
+.ph-sub{font-size:14px;color:#8090a8}
+.sug-card{background:#131d2e;border:1px solid #1e2d42;border-radius:10px;padding:.875rem 1.125rem;margin-bottom:8px}
+.sug-card.has-value{border-left:3px solid #22c55e;border-color:#1a3a1a}
+.sug-team{font-size:14px;font-weight:600;color:#f0f2f5;margin-bottom:2px}
+.sug-meta{font-size:11px;color:#8090a8}
 </style>
 """
 
@@ -89,6 +97,64 @@ STAT_LABELS = {"pts": "Points", "reb": "Rebounds", "ast": "Assists",
 LEG_TYPES = ["🎲 Prop", "💰 Moneyline", "📐 Spread"]
 
 
+def _composite(edge, prob, kelly):
+    return 0.40 * edge + 0.35 * max(0.0, prob - 0.50) + 0.25 * kelly
+
+
+def _load_suggested_legs(games_df, spreads_df):
+    """Return top composite-scored value picks across ML + spread for today."""
+    suggestions = []
+    today = date.today().isoformat()
+
+    for _, g in games_df.iterrows():
+        for side in ["home", "away"]:
+            if int(g.get(f"{side}_value", 0)) != 1:
+                continue
+            edge  = float(g.get(f"{side}_edge", 0))
+            prob  = float(g.get(f"model_{side}_prob", 0))
+            kelly = float(g.get(f"{side}_kelly", 0))
+            if edge < MIN_EDGE or prob < 0.50 or kelly < 0.005:
+                continue
+            bet_team = g["home_team"] if side == "home" else g["away_team"]
+            price    = g.get(f"{side}_price")
+            suggestions.append({
+                "type":     "ml",
+                "label":    f"{bet_team} ML",
+                "matchup":  f"{g['away_team'].split()[-1]} @ {g['home_team'].split()[-1]}",
+                "prob":     prob,
+                "edge":     edge,
+                "kelly":    kelly,
+                "score":    _composite(edge, prob, kelly),
+                "price":    price,
+            })
+
+    for _, g in spreads_df.iterrows():
+        for side in ["home", "away"]:
+            if int(g.get(f"{side}_ats_value", 0)) != 1:
+                continue
+            edge    = float(g.get(f"{side}_ats_edge", 0))
+            prob    = float(g.get(f"{side}_cover_prob", 0))
+            kelly_v = float(g.get(f"{side}_ats_kelly", 0))
+            if edge < MIN_EDGE or kelly_v < 0.005:
+                continue
+            bet_team = g["home_team"] if side == "home" else g["away_team"]
+            spread   = g.get(f"{side}_point")
+            spread_s = f"{spread:+.1f}" if spread is not None else ""
+            price    = g.get(f"{side}_price")
+            suggestions.append({
+                "type":     "spread",
+                "label":    f"{bet_team} {spread_s}",
+                "matchup":  f"{g['away_team'].split()[-1]} @ {g['home_team'].split()[-1]}",
+                "prob":     prob,
+                "edge":     edge,
+                "kelly":    kelly_v,
+                "score":    _composite(edge, prob, kelly_v),
+                "price":    price,
+            })
+
+    return sorted(suggestions, key=lambda x: x["score"], reverse=True)[:5]
+
+
 def _load_todays_games():
     today = date.today().isoformat()
     preds = _load(
@@ -141,17 +207,17 @@ def _render_ml_leg(leg_idx, games_df):
 <div class="leg-card {cls}">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
     <div>
-      <div style="font-size:15px;font-weight:600;color:#e8e8ec">{bet_team} ML</div>
-      <div style="font-size:12px;color:#6b6b78;margin-top:2px">
+      <div style="font-size:15px;font-weight:600;color:#f0f2f5">{bet_team} ML</div>
+      <div style="font-size:12px;color:#8090a8;margin-top:2px">
         {game['away_team'].split()[-1]} @ {game['home_team'].split()[-1]} &nbsp;·&nbsp; Moneyline &nbsp;·&nbsp; {_fmt(price)}
       </div>
     </div>
     <span class="badge {badge_cls}">{rec} &nbsp;{model_prob:.0%}</span>
   </div>
   <div style="display:flex;gap:20px;font-size:13px;flex-wrap:wrap">
-    <div><span style="color:#44444f">Model prob</span><span style="color:#e8e8ec;font-weight:500;margin-left:8px">{model_prob:.1%}</span></div>
-    <div><span style="color:#44444f">Book implied</span><span style="color:#e8e8ec;margin-left:8px">{fair_prob:.1%}</span></div>
-    <div><span style="color:#44444f">Edge</span><span style="color:{'#22c55e' if edge>0.03 else '#ef4444'};font-weight:600;margin-left:8px">{edge:+.1%}</span></div>
+    <div><span style="color:#7a8fa8">Model prob</span><span style="color:#f0f2f5;font-weight:500;margin-left:8px">{model_prob:.1%}</span></div>
+    <div><span style="color:#7a8fa8">Book implied</span><span style="color:#f0f2f5;margin-left:8px">{fair_prob:.1%}</span></div>
+    <div><span style="color:#7a8fa8">Edge</span><span style="color:{'#22c55e' if edge>0.03 else '#ef4444'};font-weight:600;margin-left:8px">{edge:+.1%}</span></div>
     {'<span class="badge bg" style="margin-left:4px">VALUE BET</span>' if is_value else ''}
   </div>
 </div>""", unsafe_allow_html=True)
@@ -192,17 +258,17 @@ def _render_spread_leg(leg_idx, spreads_df):
 <div class="leg-card {cls}">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
     <div>
-      <div style="font-size:15px;font-weight:600;color:#e8e8ec">{bet_team} {spread_str}</div>
-      <div style="font-size:12px;color:#6b6b78;margin-top:2px">
+      <div style="font-size:15px;font-weight:600;color:#f0f2f5">{bet_team} {spread_str}</div>
+      <div style="font-size:12px;color:#8090a8;margin-top:2px">
         {game['away_team'].split()[-1]} @ {game['home_team'].split()[-1]} &nbsp;·&nbsp; Spread &nbsp;·&nbsp; {_fmt(price)}
       </div>
     </div>
     <span class="badge {badge_cls}">{rec} &nbsp;{cover_prob:.0%}</span>
   </div>
   <div style="display:flex;gap:20px;font-size:13px;flex-wrap:wrap">
-    <div><span style="color:#44444f">P(cover)</span><span style="color:#e8e8ec;font-weight:500;margin-left:8px">{cover_prob:.1%}</span></div>
-    <div><span style="color:#44444f">Pred margin</span><span style="color:#e8e8ec;margin-left:8px">{float(game.get('pred_home_margin',0)):+.1f}</span></div>
-    <div><span style="color:#44444f">Edge</span><span style="color:{'#22c55e' if edge>0.03 else '#ef4444'};font-weight:600;margin-left:8px">{edge:+.1%}</span></div>
+    <div><span style="color:#7a8fa8">P(cover)</span><span style="color:#f0f2f5;font-weight:500;margin-left:8px">{cover_prob:.1%}</span></div>
+    <div><span style="color:#7a8fa8">Pred margin</span><span style="color:#f0f2f5;margin-left:8px">{float(game.get('pred_home_margin',0)):+.1f}</span></div>
+    <div><span style="color:#7a8fa8">Edge</span><span style="color:{'#22c55e' if edge>0.03 else '#ef4444'};font-weight:600;margin-left:8px">{edge:+.1%}</span></div>
     {'<span class="badge bg" style="margin-left:4px">VALUE BET</span>' if is_value else ''}
   </div>
 </div>""", unsafe_allow_html=True)
@@ -268,21 +334,21 @@ def _render_prop_leg(leg_idx, player_list, window):
 <div class="leg-card {cls}">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
     <div>
-      <div style="font-size:15px;font-weight:600;color:#e8e8ec">{player}</div>
-      <div style="font-size:12px;color:#6b6b78;margin-top:2px">
+      <div style="font-size:15px;font-weight:600;color:#f0f2f5">{player}</div>
+      <div style="font-size:12px;color:#8090a8;margin-top:2px">
         {direction_icon} {direction.upper()} {line} {stat_label} &nbsp;·&nbsp; {team}
       </div>
     </div>
     <div style="text-align:right">
       <span class="badge {badge_cls}">{rec} &nbsp;{hr:.0%}</span>
-      <div style="font-size:11px;color:#44444f;margin-top:4px">{hits}/{len(series)} last {window}</div>
+      <div style="font-size:11px;color:#7a8fa8;margin-top:4px">{hits}/{len(series)} last {window}</div>
     </div>
   </div>
   <div style="display:flex;gap:20px;font-size:13px;flex-wrap:wrap">
-    <div><span style="color:#44444f">Avg L{window}</span><span style="color:#e8e8ec;font-weight:500;margin-left:8px">{avg:.1f}</span></div>
-    <div><span style="color:#44444f">Std dev</span><span style="color:#e8e8ec;margin-left:8px">{std:.1f}</span></div>
-    <div><span style="color:#44444f">L5 hit rate</span><span style="color:{'#22c55e' if l5_hr>=0.6 else '#ef4444'};font-weight:600;margin-left:8px">{l5_hr:.0%}</span></div>
-    <div><span style="color:#44444f">Last 5</span><span style="margin-left:8px">{sparks}</span></div>
+    <div><span style="color:#7a8fa8">Avg L{window}</span><span style="color:#f0f2f5;font-weight:500;margin-left:8px">{avg:.1f}</span></div>
+    <div><span style="color:#7a8fa8">Std dev</span><span style="color:#f0f2f5;margin-left:8px">{std:.1f}</span></div>
+    <div><span style="color:#7a8fa8">L5 hit rate</span><span style="color:{'#22c55e' if l5_hr>=0.6 else '#ef4444'};font-weight:600;margin-left:8px">{l5_hr:.0%}</span></div>
+    <div><span style="color:#7a8fa8">Last 5</span><span style="margin-left:8px">{sparks}</span></div>
   </div>
 </div>""", unsafe_allow_html=True)
 
@@ -294,10 +360,13 @@ def _render_prop_leg(leg_idx, player_list, window):
 
 def render():
     st.markdown(_CSS, unsafe_allow_html=True)
-    st.markdown("""
-<div style="margin-bottom:1rem">
-  <div style="font-size:22px;font-weight:700;color:#e8e8ec;letter-spacing:-.3px">Parlay Builder</div>
-  <div style="font-size:13px;color:#6b6b78;margin-top:4px">Build a multi-leg parlay with props, moneyline, or spread legs.</div>
+
+    today_display = date.today().strftime("%A, %B %d, %Y")
+    st.markdown(f"""
+<div class="page-header">
+  <div class="ph-tag">🎰 Parlay Builder</div>
+  <div class="ph-title">Parlay Builder</div>
+  <div class="ph-sub">{today_display} · Combine props, moneylines &amp; spreads into a multi-leg parlay</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -309,6 +378,28 @@ def render():
     player_list = players_df["player_name"].tolist()
     games_df    = _load_todays_games()
     spreads_df  = _load_todays_spreads()
+
+    # ── Suggested legs ────────────────────────────────────────────────────────
+    suggestions = _load_suggested_legs(games_df, spreads_df)
+    if suggestions:
+        st.markdown("<div class='sh'>Today's suggested legs</div>", unsafe_allow_html=True)
+        type_icon = {"ml": "💰 Moneyline", "spread": "📐 Spread"}
+        sug_cols = st.columns(min(len(suggestions), 5))
+        for i, s in enumerate(suggestions):
+            ec = "#22c55e" if s["edge"] > 0 else "#ef4444"
+            rec_cls = "bg" if s["prob"] >= 0.60 else "by"
+            rec_lbl = "STRONG" if s["prob"] >= 0.65 else "LEAN"
+            with sug_cols[i]:
+                st.markdown(f"""
+<div class="sug-card has-value">
+  <div class="sug-team">{s['label']}</div>
+  <div class="sug-meta">{type_icon.get(s['type'],'🎲')} &nbsp;·&nbsp; {s['matchup']}</div>
+  <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+    <span class="badge {rec_cls}">{rec_lbl} {s['prob']:.0%}</span>
+    <span style="font-size:11px;color:{ec};font-weight:600">{s['edge']:+.1%} edge</span>
+    <span style="font-size:11px;color:#8090a8">{_fmt(s['price'])}</span>
+  </div>
+</div>""", unsafe_allow_html=True)
 
     s1, s2, s3, s4 = st.columns(4)
     with s1: n_legs = st.selectbox("Number of legs", [2, 3, 4, 5, 6], index=1)
@@ -374,13 +465,13 @@ def render():
             edge = combined_prob - book_implied
             edge_color = "#22c55e" if edge > 0.03 else ("#f59e0b" if edge > 0 else "#ef4444")
             edge_html = f"""
-<div style="margin-top:1rem;padding-top:1rem;border-top:1px solid #222228">
+<div style="margin-top:1rem;padding-top:1rem;border-top:1px solid #1e2d42">
   <div style="display:flex;gap:32px;flex-wrap:wrap">
-    <div><div style="font-size:11px;color:#44444f;text-transform:uppercase;letter-spacing:.06em">Book implied</div>
-         <div style="font-size:20px;font-weight:600;color:#e8e8ec;margin-top:2px">{book_implied:.1%}</div></div>
-    <div><div style="font-size:11px;color:#44444f;text-transform:uppercase;letter-spacing:.06em">Your edge</div>
+    <div><div style="font-size:11px;color:#7a8fa8;text-transform:uppercase;letter-spacing:.06em">Book implied</div>
+         <div style="font-size:20px;font-weight:600;color:#f0f2f5;margin-top:2px">{book_implied:.1%}</div></div>
+    <div><div style="font-size:11px;color:#7a8fa8;text-transform:uppercase;letter-spacing:.06em">Your edge</div>
          <div style="font-size:20px;font-weight:600;color:{edge_color};margin-top:2px">{edge:+.1%}</div></div>
-    <div><div style="font-size:11px;color:#44444f;text-transform:uppercase;letter-spacing:.06em">Verdict</div>
+    <div><div style="font-size:11px;color:#7a8fa8;text-transform:uppercase;letter-spacing:.06em">Verdict</div>
          <div style="font-size:20px;font-weight:600;color:{edge_color};margin-top:2px">
            {"✓ VALUE" if edge>0.03 else ("~ MARGINAL" if edge>0 else "✗ SKIP")}
          </div></div>
@@ -399,7 +490,7 @@ def render():
         type_icons = {"ml": "💰", "spread": "📐", "prop": "🎲"}
         leg_rows_html = "".join([
             f'<div class="stat-row">'
-            f'<span style="color:#9090a0">{type_icons.get(l["type"],"🎲")} {l["label"]}</span>'
+            f'<span style="color:#96aec8">{type_icons.get(l["type"],"🎲")} {l["label"]}</span>'
             f'<span class="badge {l["badge_cls"]}">{l["hit_rate"]:.0%}</span>'
             f'</div>'
             for l in analyzed
@@ -409,23 +500,23 @@ def render():
 <div class="parlay-summary">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px">
     <div>
-      <div style="font-size:11px;color:#44444f;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
+      <div style="font-size:11px;color:#7a8fa8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
         {len(analyzed)}-leg parlay · model probability
       </div>
       <div class="big-prob" style="color:{prob_color}">{combined_prob:.1%}</div>
-      <div style="font-size:13px;color:#6b6b78;margin-top:6px">
-        Fair odds: <strong style="color:#e8e8ec">{fair_odds}</strong>
+      <div style="font-size:13px;color:#8090a8;margin-top:6px">
+        Fair odds: <strong style="color:#f0f2f5">{fair_odds}</strong>
       </div>
     </div>
     <div style="text-align:right">
-      <div style="font-size:11px;color:#44444f;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Overall rating</div>
+      <div style="font-size:11px;color:#7a8fa8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Overall rating</div>
       <span class="badge {'bg' if all_strong and combined_prob>=0.40 else ('by' if combined_prob>=0.30 else 'br')}"
             style="font-size:14px;padding:6px 14px">
         {'✓ PLAY IT' if all_strong and combined_prob>=0.40 else ('~ MARGINAL' if combined_prob>=0.30 else '✗ SKIP')}
       </span>
     </div>
   </div>
-  <div style="margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid #1e1e24">
+  <div style="margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid #1e2d42">
     {leg_rows_html}
   </div>
   {edge_html}
@@ -441,30 +532,30 @@ def render():
         fig.add_bar(x=labels, y=[p * 100 for p in probs],
                     marker_color=colors, marker_line_width=0,
                     text=[f"{p:.0%}" for p in probs], textposition="outside",
-                    textfont=dict(color="#e8e8ec", size=12))
+                    textfont=dict(color="#f0f2f5", size=12))
         fig.add_hline(y=combined_prob * 100, line_color="#4f8ef7", line_width=1.5, line_dash="dash",
                       annotation_text=f"Combined: {combined_prob:.1%}",
                       annotation_font_color="#4f8ef7", annotation_position="top right")
         fig.add_hline(y=52.4, line_color="#333340", line_width=1,
                       annotation_text="Break-even 52.4%",
-                      annotation_font_color="#44444f", annotation_position="bottom right")
+                      annotation_font_color="#7a8fa8", annotation_position="bottom right")
         fig.update_layout(height=280, margin=dict(l=0, r=0, t=30, b=0),
-                          paper_bgcolor="#16161a", plot_bgcolor="#16161a",
-                          xaxis=dict(showgrid=False, color="#44444f"),
-                          yaxis=dict(gridcolor="#1e1e24", color="#44444f", range=[0, 105], title="%"),
-                          showlegend=False, font=dict(color="#9090a0"))
+                          paper_bgcolor="#131d2e", plot_bgcolor="#131d2e",
+                          xaxis=dict(showgrid=False, color="#7a8fa8"),
+                          yaxis=dict(gridcolor="#1a2840", color="#7a8fa8", range=[0, 105], title="%"),
+                          showlegend=False, font=dict(color="#8090a8"))
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("""
-<div style="background:#111118;border:1px solid #1e1e24;border-radius:8px;padding:12px 16px;margin-top:8px;font-size:12px;color:#44444f;line-height:1.6">
-  <strong style="color:#6b6b78">Note:</strong>
+<div style="background:#0f1828;border:1px solid #1e2d42;border-radius:8px;padding:12px 16px;margin-top:8px;font-size:12px;color:#8090a8;line-height:1.6">
+  <strong style="color:#96aec8">Note:</strong>
   Prop hit rates use rolling historical data. ML and spread probabilities come from today's model predictions.
   Same-game legs on the same team are correlated — combined probability will overstate true hit rate.
 </div>
 """, unsafe_allow_html=True)
     else:
         st.markdown("""
-<div style="background:#16161a;border:1px solid #222228;border-radius:12px;padding:2rem;text-align:center;color:#44444f;font-size:13px">
+<div style="background:#131d2e;border:1px solid #1e2d42;border-radius:12px;padding:2rem;text-align:center;color:#8090a8;font-size:13px;font-style:italic">
   Configure at least 2 legs above to see your parlay analysis
 </div>
 """, unsafe_allow_html=True)

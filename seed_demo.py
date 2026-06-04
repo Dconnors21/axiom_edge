@@ -195,8 +195,63 @@ def _seed_nba(conn):
             result TEXT, profit_units REAL, recorded_at TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS props_reb_bet_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            predict_date TEXT, game_id TEXT,
+            player_name TEXT, home_team TEXT, away_team TEXT,
+            bet_side TEXT, line REAL, pred_reb REAL,
+            ou_prob REAL, edge REAL,
+            price REAL, kelly_stake REAL,
+            result TEXT, profit_units REAL, recorded_at TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS props_ast_bet_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            predict_date TEXT, game_id TEXT,
+            player_name TEXT, home_team TEXT, away_team TEXT,
+            bet_side TEXT, line REAL, pred_ast REAL,
+            ou_prob REAL, edge REAL,
+            price REAL, kelly_stake REAL,
+            result TEXT, profit_units REAL, recorded_at TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS props_threes_bet_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            predict_date TEXT, game_id TEXT,
+            player_name TEXT, home_team TEXT, away_team TEXT,
+            bet_side TEXT, line REAL, pred_threes REAL,
+            ou_prob REAL, edge REAL,
+            price REAL, kelly_stake REAL,
+            result TEXT, profit_units REAL, recorded_at TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS props_stl_bet_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            predict_date TEXT, game_id TEXT,
+            player_name TEXT, home_team TEXT, away_team TEXT,
+            bet_side TEXT, line REAL, pred_stl REAL,
+            ou_prob REAL, edge REAL,
+            price REAL, kelly_stake REAL,
+            result TEXT, profit_units REAL, recorded_at TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS props_blk_bet_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            predict_date TEXT, game_id TEXT,
+            player_name TEXT, home_team TEXT, away_team TEXT,
+            bet_side TEXT, line REAL, pred_blk REAL,
+            ou_prob REAL, edge REAL,
+            price REAL, kelly_stake REAL,
+            result TEXT, profit_units REAL, recorded_at TEXT
+        )
+    """)
 
-    ml_rows, ats_rows, tot_rows, prop_rows = [], [], [], []
+    ml_rows, ats_rows, tot_rows, prop_rows, reb_rows, ast_rows, threes_rows, stl_rows, blk_rows = [], [], [], [], [], [], [], [], []
     matchup_pool = list(range(0, len(NBA_TEAMS) - 1, 2))
 
     for day_offset in range(90, 0, -1):
@@ -276,13 +331,20 @@ def _seed_nba(conn):
                     datetime.now().isoformat()
                 ))
 
-    # ── Props bets ──
+    # ── Props bets (points + rebounds + assists) ──
     for day_offset in range(60, 1, -1):
         d = today - timedelta(days=day_offset)
         if random.random() < 0.6:
             continue
         player = random.choice(NBA_PLAYERS)
-        pname, abbr, _, ppg, *_ = player
+        pname, abbr, _, ppg, rpg, apg, mpg = player
+        # estimate avg 3PM from player profile (stars shoot ~2-4, bigs ~0-1)
+        avg_3pm = max(0.2, np.random.normal(2.2, 1.5) if ppg > 20 else np.random.normal(0.8, 0.7))
+        # estimate spg/bpg from role: wings/guards steal more, bigs block more
+        spg = max(0.1, np.random.normal(1.3, 0.5) if ppg > 15 else np.random.normal(0.7, 0.3))
+        bpg = max(0.0, np.random.normal(1.6, 0.8) if rpg > 7  else np.random.normal(0.3, 0.3))
+
+        # Points prop
         line      = round(ppg + np.random.normal(0, 1.5), 1)
         pred_pts  = round(ppg + np.random.normal(0, 2), 1)
         over_prob = 0.5 + (pred_pts - line) / 12
@@ -305,6 +367,129 @@ def _seed_nba(conn):
                 datetime.now().isoformat()
             ))
 
+        # Rebounds prop (every other day to keep volume realistic)
+        if random.random() < 0.5:
+            r_line      = round(rpg + np.random.normal(0, 1.0), 1)
+            pred_reb    = round(rpg + np.random.normal(0, 1.2), 1)
+            r_over_prob = 0.5 + (pred_reb - r_line) / 8
+            r_over_prob = max(0.35, min(0.80, r_over_prob))
+            r_edge      = r_over_prob - np.random.uniform(0.44, 0.48)
+            if abs(r_edge) >= 0.08:
+                rb_side = "over" if r_edge > 0 else "under"
+                rprob   = r_over_prob if rb_side == "over" else 1 - r_over_prob
+                r_odds  = _american_odds(0.476)
+                r_kelly = round(abs(r_edge) * 0.25, 4)
+                r_won   = random.random() < rprob
+                r_res   = "WIN" if r_won else "LOSS"
+                r_pnl   = round(r_kelly * _payout(r_odds), 4) if r_won else round(-r_kelly, 4)
+                r_gid   = f"{d.strftime('%Y%m%d')}_REB_{abbr}"
+                reb_rows.append((
+                    d.isoformat(), r_gid, pname, "—", "—",
+                    rb_side, round(r_line, 1), round(pred_reb, 1),
+                    round(rprob, 4), round(abs(r_edge), 4),
+                    r_odds, r_kelly, r_res, r_pnl,
+                    datetime.now().isoformat()
+                ))
+
+        # 3-Pointers prop (shooters only — realistic market)
+        if random.random() < 0.40 and avg_3pm >= 1.0:
+            t_line      = round(avg_3pm + np.random.normal(0, 0.4), 1)
+            t_line      = max(0.5, t_line)
+            pred_threes = round(avg_3pm + np.random.normal(0, 0.6), 1)
+            t_over_prob = 0.5 + (pred_threes - t_line) / 5
+            t_over_prob = max(0.35, min(0.80, t_over_prob))
+            t_edge      = t_over_prob - np.random.uniform(0.44, 0.48)
+            if abs(t_edge) >= 0.08:
+                t_side  = "over" if t_edge > 0 else "under"
+                tprob   = t_over_prob if t_side == "over" else 1 - t_over_prob
+                t_odds  = _american_odds(0.476)
+                t_kelly = round(abs(t_edge) * 0.25, 4)
+                t_won   = random.random() < tprob
+                t_res   = "WIN" if t_won else "LOSS"
+                t_pnl   = round(t_kelly * _payout(t_odds), 4) if t_won else round(-t_kelly, 4)
+                t_gid   = f"{d.strftime('%Y%m%d')}_3PM_{abbr}"
+                threes_rows.append((
+                    d.isoformat(), t_gid, pname, "—", "—",
+                    t_side, round(t_line, 1), round(pred_threes, 1),
+                    round(tprob, 4), round(abs(t_edge), 4),
+                    t_odds, t_kelly, t_res, t_pnl,
+                    datetime.now().isoformat()
+                ))
+
+        # Steals prop (active defenders — spg > 0.8)
+        if random.random() < 0.35 and spg > 0.8:
+            s_line      = round(spg + np.random.normal(0, 0.3), 1)
+            s_line      = max(0.5, s_line)
+            pred_stl    = round(spg + np.random.normal(0, 0.4), 1)
+            s_over_prob = 0.5 + (pred_stl - s_line) / 4
+            s_over_prob = max(0.35, min(0.80, s_over_prob))
+            s_edge      = s_over_prob - np.random.uniform(0.44, 0.48)
+            if abs(s_edge) >= 0.08:
+                st_side = "over" if s_edge > 0 else "under"
+                sprob   = s_over_prob if st_side == "over" else 1 - s_over_prob
+                s_odds  = _american_odds(0.476)
+                s_kelly = round(abs(s_edge) * 0.25, 4)
+                s_won   = random.random() < sprob
+                s_res   = "WIN" if s_won else "LOSS"
+                s_pnl   = round(s_kelly * _payout(s_odds), 4) if s_won else round(-s_kelly, 4)
+                s_gid   = f"{d.strftime('%Y%m%d')}_STL_{abbr}"
+                stl_rows.append((
+                    d.isoformat(), s_gid, pname, "—", "—",
+                    st_side, round(s_line, 1), round(pred_stl, 1),
+                    round(sprob, 4), round(abs(s_edge), 4),
+                    s_odds, s_kelly, s_res, s_pnl,
+                    datetime.now().isoformat()
+                ))
+
+        # Blocks prop (rim protectors — bpg > 0.8)
+        if random.random() < 0.30 and bpg > 0.8:
+            k_line      = round(bpg + np.random.normal(0, 0.4), 1)
+            k_line      = max(0.5, k_line)
+            pred_blk    = round(bpg + np.random.normal(0, 0.5), 1)
+            k_over_prob = 0.5 + (pred_blk - k_line) / 4
+            k_over_prob = max(0.35, min(0.80, k_over_prob))
+            k_edge      = k_over_prob - np.random.uniform(0.44, 0.48)
+            if abs(k_edge) >= 0.08:
+                bk_side = "over" if k_edge > 0 else "under"
+                kprob   = k_over_prob if bk_side == "over" else 1 - k_over_prob
+                k_odds  = _american_odds(0.476)
+                k_kelly = round(abs(k_edge) * 0.25, 4)
+                k_won   = random.random() < kprob
+                k_res   = "WIN" if k_won else "LOSS"
+                k_pnl   = round(k_kelly * _payout(k_odds), 4) if k_won else round(-k_kelly, 4)
+                k_gid   = f"{d.strftime('%Y%m%d')}_BLK_{abbr}"
+                blk_rows.append((
+                    d.isoformat(), k_gid, pname, "—", "—",
+                    bk_side, round(k_line, 1), round(pred_blk, 1),
+                    round(kprob, 4), round(abs(k_edge), 4),
+                    k_odds, k_kelly, k_res, k_pnl,
+                    datetime.now().isoformat()
+                ))
+
+        # Assists prop (every other day, staggered with rebounds)
+        if random.random() < 0.45:
+            a_line      = round(apg + np.random.normal(0, 0.8), 1)
+            pred_ast    = round(apg + np.random.normal(0, 1.0), 1)
+            a_over_prob = 0.5 + (pred_ast - a_line) / 7
+            a_over_prob = max(0.35, min(0.80, a_over_prob))
+            a_edge      = a_over_prob - np.random.uniform(0.44, 0.48)
+            if abs(a_edge) >= 0.08:
+                as_side = "over" if a_edge > 0 else "under"
+                aprob   = a_over_prob if as_side == "over" else 1 - a_over_prob
+                a_odds  = _american_odds(0.476)
+                a_kelly = round(abs(a_edge) * 0.25, 4)
+                a_won   = random.random() < aprob
+                a_res   = "WIN" if a_won else "LOSS"
+                a_pnl   = round(a_kelly * _payout(a_odds), 4) if a_won else round(-a_kelly, 4)
+                a_gid   = f"{d.strftime('%Y%m%d')}_AST_{abbr}"
+                ast_rows.append((
+                    d.isoformat(), a_gid, pname, "—", "—",
+                    as_side, round(a_line, 1), round(pred_ast, 1),
+                    round(aprob, 4), round(abs(a_edge), 4),
+                    a_odds, a_kelly, a_res, a_pnl,
+                    datetime.now().isoformat()
+                ))
+
     conn.executemany(
         "INSERT INTO bet_log (predict_date,game_id,home_team,away_team,bet_side,bet_team,"
         "model_prob,fair_prob,edge,line,kelly_stake,result,profit_units,clv,notes,recorded_at)"
@@ -324,6 +509,31 @@ def _seed_nba(conn):
         "INSERT INTO props_bet_log (predict_date,game_id,player_name,home_team,away_team,"
         "bet_side,line,pred_pts,ou_prob,edge,price,kelly_stake,result,profit_units,recorded_at)"
         " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", prop_rows
+    )
+    conn.executemany(
+        "INSERT INTO props_reb_bet_log (predict_date,game_id,player_name,home_team,away_team,"
+        "bet_side,line,pred_reb,ou_prob,edge,price,kelly_stake,result,profit_units,recorded_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", reb_rows
+    )
+    conn.executemany(
+        "INSERT INTO props_ast_bet_log (predict_date,game_id,player_name,home_team,away_team,"
+        "bet_side,line,pred_ast,ou_prob,edge,price,kelly_stake,result,profit_units,recorded_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", ast_rows
+    )
+    conn.executemany(
+        "INSERT INTO props_threes_bet_log (predict_date,game_id,player_name,home_team,away_team,"
+        "bet_side,line,pred_threes,ou_prob,edge,price,kelly_stake,result,profit_units,recorded_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", threes_rows
+    )
+    conn.executemany(
+        "INSERT INTO props_stl_bet_log (predict_date,game_id,player_name,home_team,away_team,"
+        "bet_side,line,pred_stl,ou_prob,edge,price,kelly_stake,result,profit_units,recorded_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", stl_rows
+    )
+    conn.executemany(
+        "INSERT INTO props_blk_bet_log (predict_date,game_id,player_name,home_team,away_team,"
+        "bet_side,line,pred_blk,ou_prob,edge,price,kelly_stake,result,profit_units,recorded_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", blk_rows
     )
 
     # ── Today's predictions ───────────────────────────────────────────────────
@@ -371,10 +581,90 @@ def _seed_nba(conn):
             PRIMARY KEY (player_name, game_id, predict_date)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS props_reb_predictions (
+            player_name TEXT, game_id TEXT, predict_date TEXT,
+            home_team TEXT, away_team TEXT, commence_time TEXT,
+            bookmaker TEXT, line REAL, pred_reb REAL,
+            over_prob REAL, under_prob REAL,
+            over_fair REAL, under_fair REAL,
+            over_edge REAL, under_edge REAL,
+            over_value INTEGER, under_value INTEGER,
+            over_kelly REAL, under_kelly REAL,
+            over_price REAL, under_price REAL,
+            props_sigma REAL, actual_reb REAL,
+            PRIMARY KEY (player_name, game_id, predict_date)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS props_ast_predictions (
+            player_name TEXT, game_id TEXT, predict_date TEXT,
+            home_team TEXT, away_team TEXT, commence_time TEXT,
+            bookmaker TEXT, line REAL, pred_ast REAL,
+            over_prob REAL, under_prob REAL,
+            over_fair REAL, under_fair REAL,
+            over_edge REAL, under_edge REAL,
+            over_value INTEGER, under_value INTEGER,
+            over_kelly REAL, under_kelly REAL,
+            over_price REAL, under_price REAL,
+            props_sigma REAL, actual_ast REAL,
+            PRIMARY KEY (player_name, game_id, predict_date)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS props_threes_predictions (
+            player_name TEXT, game_id TEXT, predict_date TEXT,
+            home_team TEXT, away_team TEXT, commence_time TEXT,
+            bookmaker TEXT, line REAL, pred_threes REAL,
+            over_prob REAL, under_prob REAL,
+            over_fair REAL, under_fair REAL,
+            over_edge REAL, under_edge REAL,
+            over_value INTEGER, under_value INTEGER,
+            over_kelly REAL, under_kelly REAL,
+            over_price REAL, under_price REAL,
+            props_sigma REAL, actual_threes REAL,
+            PRIMARY KEY (player_name, game_id, predict_date)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS props_stl_predictions (
+            player_name TEXT, game_id TEXT, predict_date TEXT,
+            home_team TEXT, away_team TEXT, commence_time TEXT,
+            bookmaker TEXT, line REAL, pred_stl REAL,
+            over_prob REAL, under_prob REAL,
+            over_fair REAL, under_fair REAL,
+            over_edge REAL, under_edge REAL,
+            over_value INTEGER, under_value INTEGER,
+            over_kelly REAL, under_kelly REAL,
+            over_price REAL, under_price REAL,
+            props_sigma REAL, actual_stl REAL,
+            PRIMARY KEY (player_name, game_id, predict_date)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS props_blk_predictions (
+            player_name TEXT, game_id TEXT, predict_date TEXT,
+            home_team TEXT, away_team TEXT, commence_time TEXT,
+            bookmaker TEXT, line REAL, pred_blk REAL,
+            over_prob REAL, under_prob REAL,
+            over_fair REAL, under_fair REAL,
+            over_edge REAL, under_edge REAL,
+            over_value INTEGER, under_value INTEGER,
+            over_kelly REAL, under_kelly REAL,
+            over_price REAL, under_price REAL,
+            props_sigma REAL, actual_blk REAL,
+            PRIMARY KEY (player_name, game_id, predict_date)
+        )
+    """)
 
     conn.execute(f"DELETE FROM predictions WHERE predict_date='{today_str}'")
     conn.execute(f"DELETE FROM spread_predictions WHERE predict_date='{today_str}'")
     conn.execute(f"DELETE FROM props_predictions WHERE predict_date='{today_str}'")
+    conn.execute(f"DELETE FROM props_reb_predictions WHERE predict_date='{today_str}'")
+    conn.execute(f"DELETE FROM props_ast_predictions WHERE predict_date='{today_str}'")
+    conn.execute(f"DELETE FROM props_threes_predictions WHERE predict_date='{today_str}'")
+    conn.execute(f"DELETE FROM props_stl_predictions WHERE predict_date='{today_str}'")
+    conn.execute(f"DELETE FROM props_blk_predictions WHERE predict_date='{today_str}'")
 
     today_games = [
         ("Boston Celtics",        "Milwaukee Bucks",      "19:30"),
@@ -475,6 +765,206 @@ def _seed_nba(conn):
     conn.executemany(
         "INSERT OR IGNORE INTO props_predictions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         props_rows
+    )
+
+    # ── Today's rebounds props predictions ────────────────────────────────────
+    reb_props_rows = []
+    for i, (home_name, away_name, tip) in enumerate(today_games[:4]):
+        home_abbr = next(t[1] for t in NBA_TEAMS if t[0] == home_name)
+        away_abbr = next(t[1] for t in NBA_TEAMS if t[0] == away_name)
+        gid = _game_id(today, home_abbr, away_abbr)
+        ct  = f"{today_str}T{tip}:00Z"
+        for player_name, abbr, _, ppg, rpg, *_ in NBA_PLAYERS:
+            if abbr not in (home_abbr, away_abbr):
+                continue
+            sigma      = 3.2
+            r_line     = round(rpg + np.random.uniform(-1.0, 1.0), 1)
+            pred_reb   = round(rpg + np.random.normal(0, 1.0), 1)
+            from scipy.stats import norm as _norm
+            over_prob  = round(float(_norm.cdf((pred_reb - r_line) / sigma)), 4)
+            under_prob = round(1 - over_prob, 4)
+            over_fair  = round(np.random.uniform(0.48, 0.52), 4)
+            under_fair = round(1 - over_fair, 4)
+            over_edge  = round(over_prob - over_fair, 4)
+            under_edge = round(under_prob - under_fair, 4)
+            over_val   = 1 if over_edge >= 0.12 else 0
+            under_val  = 1 if under_edge >= 0.12 else 0
+            reb_props_rows.append((
+                player_name, gid, today_str, home_name, away_name, ct,
+                "draftkings", r_line, pred_reb,
+                over_prob, under_prob, over_fair, under_fair,
+                over_edge, under_edge, over_val, under_val,
+                round(over_edge * 0.25, 4) if over_val else 0,
+                round(under_edge * 0.25, 4) if under_val else 0,
+                -115, -105, sigma, None
+            ))
+
+    conn.executemany(
+        "INSERT OR IGNORE INTO props_reb_predictions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        reb_props_rows
+    )
+
+    # ── Today's assists props predictions ─────────────────────────────────────
+    ast_props_rows = []
+    for i, (home_name, away_name, tip) in enumerate(today_games[:4]):
+        home_abbr = next(t[1] for t in NBA_TEAMS if t[0] == home_name)
+        away_abbr = next(t[1] for t in NBA_TEAMS if t[0] == away_name)
+        gid = _game_id(today, home_abbr, away_abbr)
+        ct  = f"{today_str}T{tip}:00Z"
+        for player_name, abbr, _, ppg, rpg, apg, *_ in NBA_PLAYERS:
+            if abbr not in (home_abbr, away_abbr):
+                continue
+            sigma      = 2.4
+            a_line     = round(apg + np.random.uniform(-0.8, 0.8), 1)
+            pred_ast   = round(apg + np.random.normal(0, 0.9), 1)
+            from scipy.stats import norm as _norm
+            over_prob  = round(float(_norm.cdf((pred_ast - a_line) / sigma)), 4)
+            under_prob = round(1 - over_prob, 4)
+            over_fair  = round(np.random.uniform(0.48, 0.52), 4)
+            under_fair = round(1 - over_fair, 4)
+            over_edge  = round(over_prob - over_fair, 4)
+            under_edge = round(under_prob - under_fair, 4)
+            over_val   = 1 if over_edge >= 0.12 else 0
+            under_val  = 1 if under_edge >= 0.12 else 0
+            ast_props_rows.append((
+                player_name, gid, today_str, home_name, away_name, ct,
+                "draftkings", a_line, pred_ast,
+                over_prob, under_prob, over_fair, under_fair,
+                over_edge, under_edge, over_val, under_val,
+                round(over_edge * 0.25, 4) if over_val else 0,
+                round(under_edge * 0.25, 4) if under_val else 0,
+                -115, -105, sigma, None
+            ))
+
+    conn.executemany(
+        "INSERT OR IGNORE INTO props_ast_predictions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ast_props_rows
+    )
+
+    # ── Today's 3-pointer props predictions ──────────────────────────────────
+    threes_props_rows = []
+    for i, (home_name, away_name, tip) in enumerate(today_games[:4]):
+        home_abbr = next(t[1] for t in NBA_TEAMS if t[0] == home_name)
+        away_abbr = next(t[1] for t in NBA_TEAMS if t[0] == away_name)
+        gid = _game_id(today, home_abbr, away_abbr)
+        ct  = f"{today_str}T{tip}:00Z"
+        for player_name, abbr, _, ppg, rpg, apg, mpg in NBA_PLAYERS:
+            if abbr not in (home_abbr, away_abbr):
+                continue
+            # Only include meaningful 3PM shooters
+            avg_3pm = max(0.3, np.random.normal(2.2, 1.4) if ppg > 20 else np.random.normal(0.9, 0.6))
+            if avg_3pm < 0.8:
+                continue
+            sigma      = 1.5
+            t_line     = round(avg_3pm + np.random.uniform(-0.5, 0.5), 1)
+            t_line     = max(0.5, t_line)
+            pred_three = round(avg_3pm + np.random.normal(0, 0.5), 1)
+            from scipy.stats import norm as _norm
+            over_prob  = round(float(_norm.cdf((pred_three - t_line) / sigma)), 4)
+            under_prob = round(1 - over_prob, 4)
+            over_fair  = round(np.random.uniform(0.48, 0.52), 4)
+            under_fair = round(1 - over_fair, 4)
+            over_edge  = round(over_prob - over_fair, 4)
+            under_edge = round(under_prob - under_fair, 4)
+            over_val   = 1 if over_edge >= 0.12 else 0
+            under_val  = 1 if under_edge >= 0.12 else 0
+            threes_props_rows.append((
+                player_name, gid, today_str, home_name, away_name, ct,
+                "draftkings", t_line, pred_three,
+                over_prob, under_prob, over_fair, under_fair,
+                over_edge, under_edge, over_val, under_val,
+                round(over_edge * 0.25, 4) if over_val else 0,
+                round(under_edge * 0.25, 4) if under_val else 0,
+                -115, -105, sigma, None
+            ))
+
+    conn.executemany(
+        "INSERT OR IGNORE INTO props_threes_predictions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        threes_props_rows
+    )
+
+    # ── Today's steals props predictions ─────────────────────────────────────
+    stl_props_rows = []
+    for i, (home_name, away_name, tip) in enumerate(today_games[:4]):
+        home_abbr = next(t[1] for t in NBA_TEAMS if t[0] == home_name)
+        away_abbr = next(t[1] for t in NBA_TEAMS if t[0] == away_name)
+        gid = _game_id(today, home_abbr, away_abbr)
+        ct  = f"{today_str}T{tip}:00Z"
+        for player_name, abbr, _, ppg, rpg, apg, mpg in NBA_PLAYERS:
+            if abbr not in (home_abbr, away_abbr):
+                continue
+            # Active defenders only (wings/guards)
+            avg_spg = max(0.1, np.random.normal(1.3, 0.5) if ppg > 15 else np.random.normal(0.7, 0.3))
+            if avg_spg < 0.6:
+                continue
+            sigma      = 0.8
+            s_line     = round(avg_spg + np.random.uniform(-0.3, 0.3), 1)
+            s_line     = max(0.5, s_line)
+            pred_stl   = round(avg_spg + np.random.normal(0, 0.4), 1)
+            from scipy.stats import norm as _norm
+            over_prob  = round(float(_norm.cdf((pred_stl - s_line) / sigma)), 4)
+            under_prob = round(1 - over_prob, 4)
+            over_fair  = round(np.random.uniform(0.48, 0.52), 4)
+            under_fair = round(1 - over_fair, 4)
+            over_edge  = round(over_prob - over_fair, 4)
+            under_edge = round(under_prob - under_fair, 4)
+            over_val   = 1 if over_edge >= 0.12 else 0
+            under_val  = 1 if under_edge >= 0.12 else 0
+            stl_props_rows.append((
+                player_name, gid, today_str, home_name, away_name, ct,
+                "draftkings", s_line, pred_stl,
+                over_prob, under_prob, over_fair, under_fair,
+                over_edge, under_edge, over_val, under_val,
+                round(over_edge * 0.25, 4) if over_val else 0,
+                round(under_edge * 0.25, 4) if under_val else 0,
+                -115, -105, sigma, None
+            ))
+
+    conn.executemany(
+        "INSERT OR IGNORE INTO props_stl_predictions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        stl_props_rows
+    )
+
+    # ── Today's blocks props predictions ─────────────────────────────────────
+    blk_props_rows = []
+    for i, (home_name, away_name, tip) in enumerate(today_games[:4]):
+        home_abbr = next(t[1] for t in NBA_TEAMS if t[0] == home_name)
+        away_abbr = next(t[1] for t in NBA_TEAMS if t[0] == away_name)
+        gid = _game_id(today, home_abbr, away_abbr)
+        ct  = f"{today_str}T{tip}:00Z"
+        for player_name, abbr, _, ppg, rpg, apg, mpg in NBA_PLAYERS:
+            if abbr not in (home_abbr, away_abbr):
+                continue
+            # Rim protectors only (bigs)
+            avg_bpg = max(0.0, np.random.normal(1.6, 0.8) if rpg > 7 else np.random.normal(0.3, 0.3))
+            if avg_bpg < 0.5:
+                continue
+            sigma      = 0.9
+            k_line     = round(avg_bpg + np.random.uniform(-0.4, 0.4), 1)
+            k_line     = max(0.5, k_line)
+            pred_blk   = round(avg_bpg + np.random.normal(0, 0.5), 1)
+            from scipy.stats import norm as _norm
+            over_prob  = round(float(_norm.cdf((pred_blk - k_line) / sigma)), 4)
+            under_prob = round(1 - over_prob, 4)
+            over_fair  = round(np.random.uniform(0.48, 0.52), 4)
+            under_fair = round(1 - over_fair, 4)
+            over_edge  = round(over_prob - over_fair, 4)
+            under_edge = round(under_prob - under_fair, 4)
+            over_val   = 1 if over_edge >= 0.12 else 0
+            under_val  = 1 if under_edge >= 0.12 else 0
+            blk_props_rows.append((
+                player_name, gid, today_str, home_name, away_name, ct,
+                "draftkings", k_line, pred_blk,
+                over_prob, under_prob, over_fair, under_fair,
+                over_edge, under_edge, over_val, under_val,
+                round(over_edge * 0.25, 4) if over_val else 0,
+                round(under_edge * 0.25, 4) if under_val else 0,
+                -115, -105, sigma, None
+            ))
+
+    conn.executemany(
+        "INSERT OR IGNORE INTO props_blk_predictions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        blk_props_rows
     )
 
     conn.commit()

@@ -13,31 +13,35 @@ from config import DB_PATH
 
 _CSS = """
 <style>
-.block-container{padding-top:1.5rem;padding-bottom:2rem;max-width:1200px}
-[data-testid="metric-container"]{background:#16161a;border:1px solid #222228;border-radius:10px;padding:1rem 1.25rem}
-[data-testid="metric-container"] label{color:#6b6b78!important;font-size:11px!important;letter-spacing:.06em;text-transform:uppercase}
-[data-testid="stMetricValue"]{color:#e8e8ec!important;font-size:22px!important;font-weight:600!important}
-.sh{font-size:11px;font-weight:600;letter-spacing:.1em;color:#44444f;text-transform:uppercase;margin:1.5rem 0 .75rem;padding-bottom:8px;border-bottom:1px solid #1e1e24}
-.card{background:#16161a;border:1px solid #222228;border-radius:12px;padding:1.25rem 1.5rem;margin-bottom:10px}
-.ph{background:#16161a;border:1px solid #222228;border-radius:12px;padding:1.5rem 2rem;margin-bottom:1.5rem}
-.gr{display:flex;align-items:center;padding:8px 0;border-bottom:1px solid #1a1a20;font-size:13px}
+.block-container{padding-top:0;padding-bottom:2rem;max-width:1600px;padding-left:2rem;padding-right:2rem}
+[data-testid="metric-container"]{background:#131d2e;border:1px solid #1e2d42;border-radius:10px;padding:.875rem 1.25rem}
+[data-testid="metric-container"] label{color:#8090a8!important;font-size:11px!important;letter-spacing:.06em;text-transform:uppercase}
+[data-testid="stMetricValue"]{color:#f0f2f5!important;font-size:22px!important;font-weight:700!important}
+.sh{font-size:11px;font-weight:700;letter-spacing:.1em;color:#8090a8;text-transform:uppercase;margin:1.25rem 0 .75rem;padding-bottom:7px;border-bottom:1px solid #1e2d42}
+.card{background:#131d2e;border:1px solid #1e2d42;border-radius:10px;padding:1.25rem 1.5rem;margin-bottom:10px}
+.ph{background:linear-gradient(135deg,#0d1a2e 0%,#131d2e 60%,#120d2a 100%);border:1px solid #1e2d42;border-radius:12px;padding:1.5rem 2rem;margin-bottom:1.5rem}
+.gr{display:flex;align-items:center;padding:8px 0;border-bottom:1px solid #1a2840;font-size:13px}
 .gr:last-child{border-bottom:none}
 .hit{color:#22c55e;font-weight:600}
 .miss{color:#ef4444;font-weight:600}
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;letter-spacing:.04em}
 .bg{background:#0d2a0d;color:#22c55e;border:1px solid #1a4a1a}
 .br{background:#2a0d0d;color:#ef4444;border:1px solid #4a1a1a}
-.bn{background:#1a1a20;color:#6b6b78;border:1px solid #2a2a32}
+.bn{background:#0f1828;color:#8090a8;border:1px solid #1e2d42}
+.page-header{background:linear-gradient(135deg,#0d1a2e 0%,#131d2e 60%,#120d2a 100%);border:1px solid #1e2d42;border-radius:14px;padding:1.75rem 2rem;margin-bottom:1.5rem}
+.ph-tag{display:inline-flex;align-items:center;gap:6px;background:rgba(139,92,246,.12);border:1px solid rgba(139,92,246,.25);border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#8b5cf6;text-transform:uppercase;margin-bottom:.875rem}
+.ph-title{font-size:28px;font-weight:800;color:#f0f2f5;letter-spacing:-.5px;margin-bottom:4px}
+.ph-sub{font-size:14px;color:#8090a8}
 </style>
 """
 
 _CHART_LAYOUT = dict(
-    paper_bgcolor="#16161a", plot_bgcolor="#16161a",
+    paper_bgcolor="#131d2e", plot_bgcolor="#131d2e",
     margin=dict(l=0, r=0, t=10, b=0),
-    xaxis=dict(showgrid=False, color="#44444f"),
-    yaxis=dict(gridcolor="#1e1e24", color="#44444f", zeroline=False),
-    legend=dict(font=dict(color="#9090a0", size=11), bgcolor="rgba(0,0,0,0)"),
-    font=dict(color="#9090a0"),
+    xaxis=dict(showgrid=False, color="#7a8fa8"),
+    yaxis=dict(gridcolor="#1a2840", color="#7a8fa8", zeroline=False),
+    legend=dict(font=dict(color="#96aec8", size=11), bgcolor="rgba(0,0,0,0)"),
+    font=dict(color="#96aec8"),
 )
 
 STAT_LABELS = {"pts": "Points", "reb": "Rebounds", "ast": "Assists",
@@ -60,7 +64,14 @@ def _hit_rate(series, line, direction="over"):
 
 def render():
     st.markdown(_CSS, unsafe_allow_html=True)
-    st.markdown("<div class='sh'>Player research</div>", unsafe_allow_html=True)
+
+    st.markdown("""
+<div class="page-header">
+  <div class="ph-tag">🔬 Research</div>
+  <div class="ph-title">Player Research</div>
+  <div class="ph-sub">Rolling stats, prop hit rates, and opponent splits for any player in the database</div>
+</div>
+""", unsafe_allow_html=True)
 
     all_players_df = _load("SELECT DISTINCT player_name FROM player_game_logs ORDER BY player_name")
     if all_players_df.empty:
@@ -70,7 +81,7 @@ def render():
     all_players = all_players_df["player_name"].tolist()
 
     # ── Filter controls ──────────────────────────────────────────────────────
-    fc1, fc2, fc3, fc4, fc5 = st.columns([2, 2, 1, 1, 1])
+    fc1, fc2, fc3, fc4, fc5, fc6 = st.columns([2, 2, 1, 1, 1, 1.5])
     with fc1:
         st.caption("Search player")
         search = st.text_input("Search player", placeholder="Type name to filter…",
@@ -97,23 +108,45 @@ def render():
         prop_window = st.selectbox("Last N games", [5, 10, 15, 20], index=1,
                                    label_visibility="collapsed")
 
-    df = _load("""
+    # Load full log first so we can populate the opponent filter
+    df_all = _load("""
         SELECT * FROM player_game_logs
         WHERE player_name = ?
         ORDER BY game_date DESC
     """, params=(selected_player,))
 
-    opp_arg = None
-    opp_team = "All opponents"
+    # Extract opponent from matchup string (e.g. "LAL @ BOS" → "BOS", "LAL vs. BOS" → "BOS")
+    def _parse_opp(matchup):
+        import re
+        m = str(matchup or "")
+        parts = re.split(r"\s+(?:vs\.?|@)\s+", m)
+        return parts[-1].strip().upper() if len(parts) >= 2 else None
+
+    if not df_all.empty and "matchup" in df_all.columns:
+        df_all["_opp"] = df_all["matchup"].map(_parse_opp)
+        opp_options = ["All opponents"] + sorted(df_all["_opp"].dropna().unique().tolist())
+    else:
+        opp_options = ["All opponents"]
+
+    with fc6:
+        st.caption("vs Opponent")
+        opp_team = st.selectbox("vs Opponent", opp_options, label_visibility="collapsed", key="opp_filter")
+
+    if opp_team != "All opponents" and "_opp" in df_all.columns:
+        df = df_all[df_all["_opp"] == opp_team].copy()
+    else:
+        df = df_all.copy()
+        opp_team = "All opponents"
+
     if not df.empty:
         df["game_date"] = pd.to_datetime(df["game_date"])
 
     if df.empty:
         st.markdown("""
-<div style="background:#16161a;border:1px solid #222228;border-radius:12px;padding:2rem;text-align:center">
-  <div style="font-size:16px;color:#6b6b78;margin-bottom:8px">No data found</div>
-  <div style="font-size:13px;color:#44444f">
-    Run <code style="background:#1e1e24;padding:2px 6px;border-radius:4px;color:#9090a0">python props.py</code> to pull player game logs.
+<div style="background:#131d2e;border:1px solid #1e2d42;border-radius:12px;padding:2rem;text-align:center">
+  <div style="font-size:16px;color:#8090a8;margin-bottom:8px">No data found</div>
+  <div style="font-size:13px;color:#7a8fa8">
+    Run <code style="background:#0f1828;padding:2px 6px;border-radius:4px;color:#96aec8">python props.py</code> to pull player game logs.
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -140,8 +173,8 @@ def render():
 <div class="ph">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
     <div>
-      <div style="font-size:26px;font-weight:700;color:#e8e8ec;letter-spacing:-.5px">{selected_player}</div>
-      <div style="font-size:13px;color:#6b6b78;margin-top:4px">
+      <div style="font-size:26px;font-weight:700;color:#f0f2f5;letter-spacing:-.5px">{selected_player}</div>
+      <div style="font-size:13px;color:#8090a8;margin-top:4px">
         {team} &nbsp;·&nbsp; Last game: {latest} &nbsp;·&nbsp; {gp} games in DB{opp_tag}
       </div>
     </div>
@@ -182,7 +215,7 @@ def render():
     st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("<div class='sh'>Manual line comparison</div>", unsafe_allow_html=True)
-    st.markdown("<div style='font-size:12px;color:#44444f;margin-bottom:1rem'>Enter lines from DraftKings, FanDuel, etc. Leave at 0 to skip.</div>",
+    st.markdown("<div style='font-size:12px;color:#7a8fa8;margin-bottom:1rem'>Enter lines from DraftKings, FanDuel, etc. Leave at 0 to skip.</div>",
                 unsafe_allow_html=True)
 
     props_to_check = [("pts","Points"),("reb","Rebounds"),("ast","Assists"),
@@ -222,33 +255,33 @@ def render():
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
     <div>
-      <span style="font-size:15px;font-weight:600;color:#e8e8ec">{r['label']}</span>
-      <span style="font-size:13px;color:#44444f;margin-left:10px">line: {r['line']}</span>
+      <span style="font-size:15px;font-weight:600;color:#f0f2f5">{r['label']}</span>
+      <span style="font-size:13px;color:#7a8fa8;margin-left:10px">line: {r['line']}</span>
     </div>
     <span class="badge {r['rcls']}">{r['rec']}</span>
   </div>
   <div style="display:flex;gap:20px;font-size:13px;margin-bottom:12px;flex-wrap:wrap">
-    <div><span style="color:#44444f">Avg L5</span> <span style="color:{ac};font-weight:600;margin-left:8px">{r['l5']:.1f}</span></div>
-    <div><span style="color:#44444f">Avg L10</span> <span style="color:{ac};font-weight:600;margin-left:8px">{r['l10']:.1f}</span></div>
-    <div><span style="color:#44444f">Avg L20</span> <span style="color:#e8e8ec;margin-left:8px">{r['l20']:.1f}</span></div>
-    <div><span style="color:#44444f">Over rate</span> <span style="color:#22c55e;font-weight:600;margin-left:8px">{r['ho']:.0%}</span></div>
-    <div><span style="color:#44444f">Under rate</span> <span style="color:#ef4444;font-weight:600;margin-left:8px">{r['hu']:.0%}</span></div>
+    <div><span style="color:#7a8fa8">Avg L5</span> <span style="color:{ac};font-weight:600;margin-left:8px">{r['l5']:.1f}</span></div>
+    <div><span style="color:#7a8fa8">Avg L10</span> <span style="color:{ac};font-weight:600;margin-left:8px">{r['l10']:.1f}</span></div>
+    <div><span style="color:#7a8fa8">Avg L20</span> <span style="color:#f0f2f5;margin-left:8px">{r['l20']:.1f}</span></div>
+    <div><span style="color:#7a8fa8">Over rate</span> <span style="color:#22c55e;font-weight:600;margin-left:8px">{r['ho']:.0%}</span></div>
+    <div><span style="color:#7a8fa8">Under rate</span> <span style="color:#ef4444;font-weight:600;margin-left:8px">{r['hu']:.0%}</span></div>
   </div>
   <div style="display:flex;align-items:center;gap:10px">
     <span style="font-size:11px;color:#22c55e;width:36px">OVER</span>
-    <div style="flex:1;background:#222228;border-radius:3px;height:6px;overflow:hidden">
+    <div style="flex:1;background:#1e2d42;border-radius:3px;height:6px;overflow:hidden">
       <div style="width:{ow}%;height:100%;background:{bc};border-radius:3px"></div>
     </div>
     <span style="font-size:11px;color:#ef4444;width:42px;text-align:right">UNDER</span>
   </div>
-  <div style="display:flex;justify-content:space-between;font-size:11px;color:#44444f;margin-top:3px">
+  <div style="display:flex;justify-content:space-between;font-size:11px;color:#7a8fa8;margin-top:3px">
     <span>{ow}%</span><span>{uw}%</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
     else:
         st.markdown("""
-<div style="background:#16161a;border:1px solid #222228;border-radius:10px;padding:1.25rem 1.5rem;color:#44444f;font-size:13px">
+<div style="background:#131d2e;border:1px solid #1e2d42;border-radius:10px;padding:1.25rem 1.5rem;color:#96aec8;font-size:13px;font-style:italic">
   Enter lines above to see over/under analysis
 </div>
 """, unsafe_allow_html=True)
@@ -270,19 +303,19 @@ def render():
         co1, co2 = st.columns(2)
         with co1:
             rows_html = "".join([
-                f'<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #1a1a20;font-size:13px">'
-                f'<span style="color:#6b6b78">{lbl}</span>'
-                f'<span style="color:#e8e8ec;font-weight:500">{df[s].astype(float).mean():.1f}</span></div>'
+                f'<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #1a2840;font-size:13px">'
+                f'<span style="color:#8090a8">{lbl}</span>'
+                f'<span style="color:#f0f2f5;font-weight:500">{df[s].astype(float).mean():.1f}</span></div>'
                 for s, lbl in [("pts","Points"),("reb","Rebounds"),("ast","Assists"),
                                ("fg3m","3PM"),("stl","Steals"),("blk","Blocks")]
             ])
             st.markdown(f"""
 <div class="card">
-  <div style="font-size:12px;color:#44444f;letter-spacing:.05em;text-transform:uppercase;margin-bottom:12px">Averages vs {opp_team[:20]}</div>
+  <div style="font-size:12px;color:#7a8fa8;letter-spacing:.05em;text-transform:uppercase;margin-bottom:12px">Averages vs {opp_team[:20]}</div>
   {rows_html}
   <div style="display:flex;justify-content:space-between;padding:7px 0;font-size:13px">
-    <span style="color:#6b6b78">Games played</span>
-    <span style="color:#e8e8ec;font-weight:500">{len(df)}</span>
+    <span style="color:#8090a8">Games played</span>
+    <span style="color:#f0f2f5;font-weight:500">{len(df)}</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -293,14 +326,14 @@ def render():
                 d   = pd.to_datetime(row["game_date"]).strftime("%b %d, %Y")
                 log_rows += f"""
 <div class="gr">
-  <span style="color:#44444f;width:90px;font-size:12px">{d}</span>
+  <span style="color:#7a8fa8;width:90px;font-size:12px">{d}</span>
   <span style="color:{wlc};width:24px;font-weight:600">{row.get('wl','')}</span>
-  <span style="color:#e8e8ec;width:36px">{int(row['pts'])}</span>
-  <span style="color:#6b6b78;font-size:12px">{int(row['reb'])}r &nbsp;{int(row['ast'])}a &nbsp;{int(row['fg3m'])}3</span>
+  <span style="color:#f0f2f5;width:36px">{int(row['pts'])}</span>
+  <span style="color:#8090a8;font-size:12px">{int(row['reb'])}r &nbsp;{int(row['ast'])}a &nbsp;{int(row['fg3m'])}3</span>
 </div>"""
             st.markdown(f"""
 <div class="card">
-  <div style="font-size:12px;color:#44444f;letter-spacing:.05em;text-transform:uppercase;margin-bottom:12px">Game log</div>
+  <div style="font-size:12px;color:#7a8fa8;letter-spacing:.05em;text-transform:uppercase;margin-bottom:12px">Game log</div>
   {log_rows}
 </div>
 """, unsafe_allow_html=True)
@@ -317,19 +350,19 @@ def render():
         mtch = str(row.get("matchup", ""))[:24]
         log_rows += f"""
 <div class="gr">
-  <span style="color:#44444f;width:56px;font-size:12px">{d}</span>
-  <span style="color:#6b6b78;flex:1;font-size:12px">{mtch}</span>
+  <span style="color:#7a8fa8;width:56px;font-size:12px">{d}</span>
+  <span style="color:#8090a8;flex:1;font-size:12px">{mtch}</span>
   <span style="color:{wlc};width:20px;font-size:12px;font-weight:600">{row.get('wl','')}</span>
-  <span style="color:#9090a0;width:32px;font-size:12px;text-align:right">{int(row['pts'])}</span>
-  <span style="color:#9090a0;width:28px;font-size:12px;text-align:right">{int(row['reb'])}</span>
-  <span style="color:#9090a0;width:28px;font-size:12px;text-align:right">{int(row['ast'])}</span>
-  <span style="color:#9090a0;width:28px;font-size:12px;text-align:right">{int(row['fg3m'])}</span>
+  <span style="color:#96aec8;width:32px;font-size:12px;text-align:right">{int(row['pts'])}</span>
+  <span style="color:#96aec8;width:28px;font-size:12px;text-align:right">{int(row['reb'])}</span>
+  <span style="color:#96aec8;width:28px;font-size:12px;text-align:right">{int(row['ast'])}</span>
+  <span style="color:#96aec8;width:28px;font-size:12px;text-align:right">{int(row['fg3m'])}</span>
   <span class="{vcls}" style="width:52px;text-align:right">{val:.0f} {"✓" if hit else "✗"}</span>
 </div>"""
     st.markdown(f"""
 <div class="card">
-  <div style="display:flex;padding:0 0 8px;border-bottom:1px solid #1e1e24;
-    font-size:11px;color:#44444f;letter-spacing:.04em;text-transform:uppercase">
+  <div style="display:flex;padding:0 0 8px;border-bottom:1px solid #1e2d42;
+    font-size:11px;color:#7a8fa8;letter-spacing:.04em;text-transform:uppercase">
     <span style="width:56px">Date</span>
     <span style="flex:1">Matchup</span>
     <span style="width:20px">W/L</span>

@@ -11,7 +11,9 @@ from xgboost import XGBClassifier
 from sklearn.model_selection import cross_val_score
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import accuracy_score, roc_auc_score, log_loss, brier_score_loss
-from mlb_config import MLB_DB_PATH, FEATURE_COLS, TARGET
+from mlb_config import MLB_DB_PATH, FEATURE_COLS, TARGET, WEIGHT_HALF_LIFE
+from datetime import date as _date
+_CURRENT_SEASON = str(_date.today().year)
 
 def get_conn():
     return sqlite3.connect(MLB_DB_PATH)
@@ -28,12 +30,18 @@ def load_data(conn):
     print(f"  Loaded {len(df):,} games | Features: {len(available)}")
     return df, available
 
+def _time_weights(dates):
+    today    = pd.Timestamp.today().normalize()
+    days_old = (today - pd.to_datetime(dates)).dt.days.clip(lower=0).values
+    return np.exp(-np.log(2) / WEIGHT_HALF_LIFE * days_old)
+
+
 def split(df):
     train = df[df["season"].isin(["2023","2024","2025"])].copy()
-    test  = df[df["season"] == "2026"].copy()
+    test  = df[df["season"] == _CURRENT_SEASON].copy()
     return train, test
 
-def train(X_train, y_train):
+def train(X_train, y_train, sample_weight=None):
     print("  Training XGBoost...")
     model = XGBClassifier(
         n_estimators=400,
@@ -53,7 +61,7 @@ def train(X_train, y_train):
                          scoring="roc_auc", n_jobs=-1)
     print(f"  CV ROC-AUC: {cv.mean():.4f} ± {cv.std():.4f}")
     calibrated = CalibratedClassifierCV(model, cv=5, method="isotonic")
-    calibrated.fit(X_train, y_train)
+    calibrated.fit(X_train, y_train, sample_weight=sample_weight)
     return calibrated
 
 def evaluate(model, X_test, y_test, feature_cols):
@@ -112,10 +120,12 @@ if __name__ == "__main__":
 
     X_train = train_df[feature_cols]
     y_train = train_df[TARGET]
+    w_train = _time_weights(train_df["game_date"])
+    print(f"  Weight range   : {w_train.min():.3f} – {w_train.max():.3f} (decay half-life={WEIGHT_HALF_LIFE}d)")
     X_test  = test_df[feature_cols]
     y_test  = test_df[TARGET]
 
-    model = train(X_train, y_train)
+    model = train(X_train, y_train, sample_weight=w_train)
     auc, probs = evaluate(model, X_test, y_test, feature_cols)
 
     print(f"\n── Saving ───────────────────────────────────────────────")

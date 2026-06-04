@@ -183,8 +183,11 @@ def build_features(totals_df, conn, feature_cols):
     return pd.DataFrame(rows)
 
 
-def generate_predictions(features_df, model, feature_cols, totals_df, sigma):
-    X = features_df[feature_cols].fillna(0)
+def generate_predictions(features_df, model, feature_cols, totals_df, sigma, skill=1.0):
+    # Fill missing features with the training median, not 0 — a 0 for a ~4.5-run
+    # rolling feature is wildly out-of-distribution and produces garbage totals.
+    X = features_df[feature_cols].copy()
+    X = X.fillna(X.median(numeric_only=True)).fillna(0)
     pred_totals = model.predict(X)
 
     features_df = features_df.copy()
@@ -198,6 +201,14 @@ def generate_predictions(features_df, model, feature_cols, totals_df, sigma):
         ]],
         on="game_id", how="left"
     )
+
+    # Shrink the raw prediction toward the market line by the model's skill factor.
+    # skill=0 (R2<=0, no out-of-sample edge) => pred collapses to the line => ~0 edge.
+    def _shrink(r):
+        if pd.isna(r["total_line"]):
+            return r["pred_total"]
+        return r["total_line"] + skill * (r["pred_total"] - r["total_line"])
+    results["pred_total"] = results.apply(_shrink, axis=1)
 
     results["over_prob"]  = results.apply(
         lambda r: norm.cdf((r["pred_total"] - r["total_line"]) / sigma)
@@ -287,9 +298,14 @@ if __name__ == "__main__":
     with open("mlb_totals_features.json") as f:
         feature_cols = json.load(f)
     with open("mlb_totals_model_std.json") as f:
-        sigma = json.load(f)["rmse"]
+        _std  = json.load(f)
+        sigma = _std["rmse"]
+        skill = float(_std.get("skill", 1.0))
 
-    print(f"  Model loaded. sigma={sigma:.2f} runs. Features: {len(feature_cols)}")
+    print(f"  Model loaded. sigma={sigma:.2f} runs. skill={skill:.3f}. Features: {len(feature_cols)}")
+    if skill <= 0.0:
+        print(f"  NOTE: skill=0 (model has no out-of-sample edge) -> predictions "
+              f"shrink to the market line, no value bets will be flagged.")
 
     conn = get_conn()
 
@@ -306,7 +322,7 @@ if __name__ == "__main__":
         conn.close()
         exit()
 
-    results = generate_predictions(features_df, model, feature_cols, totals_df, sigma)
+    results = generate_predictions(features_df, model, feature_cols, totals_df, sigma, skill)
 
     print(f"\n{'='*60}")
     print(f"  MLB TOTALS PICKS")

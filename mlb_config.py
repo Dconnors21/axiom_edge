@@ -13,8 +13,12 @@ MLB_SPORT     = "baseball_mlb"
 SHARP_BOOKS   = ["pinnacle","draftkings","fanduel","betmgm","caesars"]
 
 # ── Model settings ────────────────────────────────────────────────────────────
-MIN_EDGE      = 0.03    # minimum edge to flag as value bet
+MIN_EDGE      = 0.05    # minimum edge to flag as value bet — 5% filters below typical vig
 KELLY_FRACTION = 0.25   # quarter Kelly
+
+# Training sample weights — exponential time decay.
+# Games WEIGHT_HALF_LIFE days old get half the weight of today's games.
+WEIGHT_HALF_LIFE = 365
 
 # ── Rolling windows ───────────────────────────────────────────────────────────
 ROLLING_SHORT = 5
