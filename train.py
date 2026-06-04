@@ -12,11 +12,10 @@ import json
 from pathlib import Path
 from xgboost import XGBClassifier
 from sklearn.model_selection import cross_val_score
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import (
     accuracy_score, log_loss, brier_score_loss, roc_auc_score
 )
-from config import DB_PATH
+from config import DB_PATH, WEIGHT_HALF_LIFE
 
 def get_conn():
     return sqlite3.connect(DB_PATH)
@@ -107,6 +106,13 @@ def load_matchups(conn):
 
 # ── Train / test split ────────────────────────────────────────────────────────
 
+def _time_weights(dates):
+    """Exponential decay: games WEIGHT_HALF_LIFE days old get 0.5x weight."""
+    today    = pd.Timestamp.today().normalize()
+    days_old = (today - pd.to_datetime(dates)).dt.days.clip(lower=0).values
+    return np.exp(-np.log(2) / WEIGHT_HALF_LIFE * days_old)
+
+
 def split_by_season(df):
     train = df[df["season"].isin(["2023-24", "2024-25"])].copy()
     test  = df[df["season"] == "2025-26"].copy()
@@ -114,7 +120,7 @@ def split_by_season(df):
 
 # ── Model training ────────────────────────────────────────────────────────────
 
-def train_model(X_train, y_train):
+def train_model(X_train, y_train, sample_weight=None):
     print("  Training XGBoost classifier...")
 
     model = XGBClassifier(
@@ -138,12 +144,18 @@ def train_model(X_train, y_train):
                                 scoring="roc_auc", n_jobs=-1)
     print(f"  CV ROC-AUC: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
 
-    # Calibrate probabilities — important for EV calculations
-    # Raw XGBoost probabilities can be overconfident
-    calibrated = CalibratedClassifierCV(model, cv=5, method="isotonic")
-    calibrated.fit(X_train, y_train)
+    # NOTE: We deliberately do NOT wrap this in CalibratedClassifierCV.
+    # The calibration audit (calibration_audit.py) showed that for this heavily
+    # regularized config (max_depth=4, min_child_weight=5, gamma=0.1,
+    # reg_lambda=1.0, subsample/colsample=0.8) the RAW probabilities are already
+    # well-calibrated on the held-out season (ECE 0.040), while isotonic on top
+    # compresses predictions toward 0.5 (ECE 0.057, std 0.214->0.131) — i.e. it
+    # makes favorites underconfident. Raw wins on ECE, Brier, and log-loss.
+    # If hyperparameters change toward a less-regularized model, re-run the audit
+    # and reconsider re-introducing CalibratedClassifierCV.
+    model.fit(X_train, y_train, sample_weight=sample_weight)
 
-    return calibrated
+    return model
 
 # ── Evaluation ────────────────────────────────────────────────────────────────
 
@@ -162,9 +174,9 @@ def evaluate(model, X_test, y_test, feature_cols):
     print(f"  Log loss       : {ll:.4f}   (lower = better)")
     print(f"  Brier score    : {brier:.4f} (lower = better)")
 
-    # Feature importance from the base estimator
+    # Feature importance — model is now the raw XGBClassifier (see train_model).
     try:
-        base_model = model.estimator if hasattr(model, 'estimator') else model.calibrated_classifiers_[0].estimator
+        base_model = getattr(model, "estimator", model)
         importances = pd.Series(
             base_model.feature_importances_,
             index=feature_cols
@@ -229,13 +241,15 @@ if __name__ == "__main__":
     print(f"  Train set      : {len(train_df):,} games ({train_df['season'].unique()})")
     print(f"  Test set       : {len(test_df):,} games ({test_df['season'].unique()})")
 
-    X_train = train_df[feature_cols]
-    y_train = train_df[TARGET]
-    X_test  = test_df[feature_cols]
-    y_test  = test_df[TARGET]
+    X_train   = train_df[feature_cols]
+    y_train   = train_df[TARGET]
+    X_test    = test_df[feature_cols]
+    y_test    = test_df[TARGET]
+    w_train   = _time_weights(train_df["game_date"])
+    print(f"  Weight range   : {w_train.min():.3f} – {w_train.max():.3f} (decay half-life={WEIGHT_HALF_LIFE}d)")
 
     # Train
-    model = train_model(X_train, y_train)
+    model = train_model(X_train, y_train, sample_weight=w_train)
 
     # Evaluate
     acc, auc, probs = evaluate(model, X_test, y_test, feature_cols)

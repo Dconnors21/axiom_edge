@@ -12,32 +12,36 @@ from mlb_config import MLB_DB_PATH
 
 _CSS = """
 <style>
-.block-container{padding-top:1.5rem;padding-bottom:2rem;max-width:1200px}
-[data-testid="metric-container"]{background:#13131a;border:1px solid #1e1e28;border-radius:10px;padding:1rem 1.25rem}
-[data-testid="metric-container"] label{color:#6b6b78!important;font-size:11px!important;letter-spacing:.06em;text-transform:uppercase}
-[data-testid="stMetricValue"]{color:#e8e8ec!important;font-size:22px!important;font-weight:600!important}
-.sh{font-size:11px;font-weight:600;letter-spacing:.1em;color:#44444f;text-transform:uppercase;margin:1.5rem 0 .75rem;padding-bottom:8px;border-bottom:1px solid #1e1e28}
-.card{background:#13131a;border:1px solid #1e1e28;border-radius:12px;padding:1.25rem 1.5rem;margin-bottom:10px}
-.ph{background:#13131a;border:1px solid #1e1e28;border-radius:12px;padding:1.5rem 2rem;margin-bottom:1.5rem}
-.gr{display:flex;align-items:center;padding:8px 0;border-bottom:1px solid #1a1a24;font-size:13px}
+.block-container{padding-top:0;padding-bottom:2rem;max-width:1600px;padding-left:2rem;padding-right:2rem}
+[data-testid="metric-container"]{background:#131d2e;border:1px solid #1e2d42;border-radius:10px;padding:.875rem 1.25rem}
+[data-testid="metric-container"] label{color:#8090a8!important;font-size:11px!important;letter-spacing:.06em;text-transform:uppercase}
+[data-testid="stMetricValue"]{color:#f0f2f5!important;font-size:22px!important;font-weight:700!important}
+.sh{font-size:11px;font-weight:700;letter-spacing:.1em;color:#8090a8;text-transform:uppercase;margin:1.25rem 0 .75rem;padding-bottom:7px;border-bottom:1px solid #1e2d42}
+.card{background:#131d2e;border:1px solid #1e2d42;border-radius:10px;padding:1.25rem 1.5rem;margin-bottom:10px}
+.ph{background:linear-gradient(135deg,#0d1a2e 0%,#131d2e 60%,#0a1e0a 100%);border:1px solid #1e2d42;border-radius:12px;padding:1.5rem 2rem;margin-bottom:1.5rem}
+.gr{display:flex;align-items:center;padding:8px 0;border-bottom:1px solid #1a2840;font-size:13px}
 .gr:last-child{border-bottom:none}
 .hit{color:#22c55e;font-weight:600}
 .miss{color:#ef4444;font-weight:600}
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;letter-spacing:.04em}
 .bg{background:#0d2a0d;color:#22c55e;border:1px solid #1a4a1a}
 .br{background:#2a0d0d;color:#ef4444;border:1px solid #4a1a1a}
-.bn{background:#1a1a20;color:#6b6b78;border:1px solid #2a2a32}
+.bn{background:#0f1828;color:#8090a8;border:1px solid #1e2d42}
 .by{background:#2a1f0d;color:#f59e0b;border:1px solid #4a380d}
+.page-header{background:linear-gradient(135deg,#0d1a2e 0%,#131d2e 60%,#0a1e0a 100%);border:1px solid #1e2d42;border-radius:14px;padding:1.75rem 2rem;margin-bottom:1.5rem}
+.ph-tag{display:inline-flex;align-items:center;gap:6px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.25);border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#22c55e;text-transform:uppercase;margin-bottom:.875rem}
+.ph-title{font-size:28px;font-weight:800;color:#f0f2f5;letter-spacing:-.5px;margin-bottom:4px}
+.ph-sub{font-size:14px;color:#8090a8}
 </style>
 """
 
 _CHART = dict(
-    paper_bgcolor="#13131a", plot_bgcolor="#13131a",
+    paper_bgcolor="#131d2e", plot_bgcolor="#131d2e",
     margin=dict(l=0, r=0, t=10, b=0),
-    xaxis=dict(showgrid=False, color="#44444f"),
-    yaxis=dict(gridcolor="#1e1e28", color="#44444f", zeroline=False),
-    legend=dict(font=dict(color="#9090a0", size=11), bgcolor="rgba(0,0,0,0)"),
-    font=dict(color="#9090a0"),
+    xaxis=dict(showgrid=False, color="#7a8fa8"),
+    yaxis=dict(gridcolor="#1a2840", color="#7a8fa8", zeroline=False),
+    legend=dict(font=dict(color="#8090a8", size=11), bgcolor="rgba(0,0,0,0)"),
+    font=dict(color="#8090a8"),
 )
 
 STAT_LABELS = {
@@ -49,6 +53,15 @@ STAT_LABELS = {
 }
 
 STAT_DEFAULTS = {"k": 5.5, "ip": 5.5, "er": 2.5, "h": 6.5, "bb": 2.5}
+
+# Maps the dropdown key -> actual column name in mlb_pitcher_game_logs.
+STAT_COL = {
+    "k":  "strikeouts",
+    "ip": "innings_pitched",
+    "er": "earned_runs",
+    "h":  "hits_allowed",
+    "bb": "walks",
+}
 
 
 def _load(query, params=None):
@@ -73,24 +86,22 @@ def _hit_rate(series, line, direction="over"):
 def render():
     st.markdown(_CSS, unsafe_allow_html=True)
     st.markdown("""
-<div style="margin-bottom:1rem">
-  <div style="font-size:22px;font-weight:700;color:#e8e8ec;letter-spacing:-.3px">⚾ Pitcher Research</div>
-  <div style="font-size:13px;color:#6b6b78;margin-top:4px">
-    Analyse starting pitcher props — strikeouts, innings, earned runs and more.
-  </div>
+<div class="page-header">
+  <div class="ph-tag">⚾ Research</div>
+  <div class="ph-title">Pitcher Research</div>
+  <div class="ph-sub">Rolling start logs, prop hit rates, and season stats for any starter in the database</div>
 </div>
 """, unsafe_allow_html=True)
 
     pitchers_df = _load("""
-        SELECT DISTINCT pitcher_name FROM mlb_pitcher_logs
-        WHERE is_starter = 1
-        ORDER BY pitcher_name
+        SELECT DISTINCT player_name FROM mlb_pitcher_game_logs
+        ORDER BY player_name
     """)
     if pitchers_df.empty:
         st.warning("No pitcher data found in the database.")
         return
 
-    all_pitchers = pitchers_df["pitcher_name"].tolist()
+    all_pitchers = pitchers_df["player_name"].tolist()
 
     # ── Filter row ──────────────────────────────────────────────────────────
     fc1, fc2, fc3, fc4, fc5 = st.columns([2, 2, 1, 1, 1])
@@ -122,22 +133,23 @@ def render():
 
     # ── Load pitcher logs ────────────────────────────────────────────────────
     df = _load("""
-        SELECT * FROM mlb_pitcher_logs
-        WHERE pitcher_name = ? AND is_starter = 1
+        SELECT * FROM mlb_pitcher_game_logs
+        WHERE player_name = ?
         ORDER BY game_date DESC
     """, params=(selected,))
 
     if df.empty:
         st.markdown("""
-<div style="background:#13131a;border:1px solid #1e1e28;border-radius:12px;padding:2rem;text-align:center">
-  <div style="font-size:16px;color:#6b6b78">No start history found for this pitcher.</div>
+<div style="background:#131d2e;border:1px solid #1e2d42;border-radius:12px;padding:2rem;text-align:center">
+  <div style="font-size:16px;color:#8090a8">No start history found for this pitcher.</div>
 </div>
 """, unsafe_allow_html=True)
         return
 
     df["game_date"] = pd.to_datetime(df["game_date"])
+    stat_col    = STAT_COL.get(prop_stat, prop_stat)
     df_recent   = df.head(prop_window).copy()
-    stat_series = pd.to_numeric(df_recent[prop_stat], errors="coerce").dropna()
+    stat_series = pd.to_numeric(df_recent[stat_col], errors="coerce").dropna()
 
     team   = df.iloc[0].get("team", "")
     latest = df["game_date"].max().strftime("%b %d, %Y")
@@ -168,18 +180,18 @@ def render():
 
     season_pills = ""
     if era_s is not None:
-        season_pills += f'<div style="background:#0f0f12;border:1px solid #1e1e28;border-radius:8px;padding:10px 16px;text-align:center;min-width:80px"><div style="font-size:18px;font-weight:700;color:{era_color}">{era_s:.2f}</div><div style="font-size:10px;color:#44444f;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Season ERA</div></div>'
+        season_pills += f'<div style="background:#0f1828;border:1px solid #1e2d42;border-radius:8px;padding:10px 16px;text-align:center;min-width:80px"><div style="font-size:18px;font-weight:700;color:{era_color}">{era_s:.2f}</div><div style="font-size:10px;color:#7a8fa8;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Season ERA</div></div>'
     if whip_s is not None:
-        season_pills += f'<div style="background:#0f0f12;border:1px solid #1e1e28;border-radius:8px;padding:10px 16px;text-align:center;min-width:80px"><div style="font-size:18px;font-weight:700;color:{whip_color}">{whip_s:.2f}</div><div style="font-size:10px;color:#44444f;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Season WHIP</div></div>'
+        season_pills += f'<div style="background:#0f1828;border:1px solid #1e2d42;border-radius:8px;padding:10px 16px;text-align:center;min-width:80px"><div style="font-size:18px;font-weight:700;color:{whip_color}">{whip_s:.2f}</div><div style="font-size:10px;color:#7a8fa8;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Season WHIP</div></div>'
     if k9_s is not None:
-        season_pills += f'<div style="background:#0f0f12;border:1px solid #1e1e28;border-radius:8px;padding:10px 16px;text-align:center;min-width:80px"><div style="font-size:18px;font-weight:700;color:#6366f1">{k9_s:.1f}</div><div style="font-size:10px;color:#44444f;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">K/9</div></div>'
+        season_pills += f'<div style="background:#0f1828;border:1px solid #1e2d42;border-radius:8px;padding:10px 16px;text-align:center;min-width:80px"><div style="font-size:18px;font-weight:700;color:#6366f1">{k9_s:.1f}</div><div style="font-size:10px;color:#7a8fa8;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">K/9</div></div>'
 
     st.markdown(f"""
 <div class="ph">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
     <div>
-      <div style="font-size:26px;font-weight:700;color:#e8e8ec;letter-spacing:-.5px">{selected}</div>
-      <div style="font-size:13px;color:#6b6b78;margin-top:4px">
+      <div style="font-size:26px;font-weight:700;color:#f0f2f5;letter-spacing:-.5px">{selected}</div>
+      <div style="font-size:13px;color:#8090a8;margin-top:4px">
         {team} &nbsp;·&nbsp; Last start: {latest} &nbsp;·&nbsp; {n_gs} starts in DB
       </div>
       <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
@@ -208,7 +220,7 @@ def render():
     st.markdown(f"<div class='sh'>{stat_lbl} — last 20 starts</div>", unsafe_allow_html=True)
     df_plot    = df.sort_values("game_date").tail(20).copy()
     x          = df_plot["game_date"]
-    y          = pd.to_numeric(df_plot[prop_stat], errors="coerce").fillna(0)
+    y          = pd.to_numeric(df_plot[stat_col], errors="coerce").fillna(0)
     bar_colors = ["#22c55e" if v >= prop_line else "#ef4444" for v in y]
     roll5      = y.reset_index(drop=True).rolling(5, min_periods=1).mean()
 
@@ -243,7 +255,7 @@ def render():
 
     # ── Manual line comparison ───────────────────────────────────────────────
     st.markdown("<div class='sh'>Check multiple lines</div>", unsafe_allow_html=True)
-    st.markdown("<div style='font-size:12px;color:#44444f;margin-bottom:1rem'>Enter lines from DraftKings, FanDuel, etc. Leave at 0 to skip.</div>",
+    st.markdown("<div style='font-size:12px;color:#7a8fa8;margin-bottom:1rem'>Enter lines from DraftKings, FanDuel, etc. Leave at 0 to skip.</div>",
                 unsafe_allow_html=True)
 
     props_to_check = [
@@ -286,25 +298,25 @@ def render():
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
     <div>
-      <span style="font-size:15px;font-weight:600;color:#e8e8ec">{r['label']}</span>
-      <span style="font-size:13px;color:#44444f;margin-left:10px">line: {r['line']}</span>
+      <span style="font-size:15px;font-weight:600;color:#f0f2f5">{r['label']}</span>
+      <span style="font-size:13px;color:#7a8fa8;margin-left:10px">line: {r['line']}</span>
     </div>
     <span class="badge {r['rcls']}">{r['rec']}</span>
   </div>
   <div style="display:flex;gap:20px;font-size:13px;margin-bottom:12px;flex-wrap:wrap">
-    <div><span style="color:#44444f">Avg L5</span> <span style="color:{ac};font-weight:600;margin-left:8px">{r['l5']:.1f}</span></div>
-    <div><span style="color:#44444f">Avg L10</span> <span style="color:{ac};font-weight:600;margin-left:8px">{r['l10']:.1f}</span></div>
-    <div><span style="color:#44444f">Over rate</span> <span style="color:#22c55e;font-weight:600;margin-left:8px">{r['ho']:.0%}</span></div>
-    <div><span style="color:#44444f">Under rate</span> <span style="color:#ef4444;font-weight:600;margin-left:8px">{r['hu']:.0%}</span></div>
+    <div><span style="color:#7a8fa8">Avg L5</span> <span style="color:{ac};font-weight:600;margin-left:8px">{r['l5']:.1f}</span></div>
+    <div><span style="color:#7a8fa8">Avg L10</span> <span style="color:{ac};font-weight:600;margin-left:8px">{r['l10']:.1f}</span></div>
+    <div><span style="color:#7a8fa8">Over rate</span> <span style="color:#22c55e;font-weight:600;margin-left:8px">{r['ho']:.0%}</span></div>
+    <div><span style="color:#7a8fa8">Under rate</span> <span style="color:#ef4444;font-weight:600;margin-left:8px">{r['hu']:.0%}</span></div>
   </div>
   <div style="display:flex;align-items:center;gap:10px">
     <span style="font-size:11px;color:#22c55e;width:36px">OVER</span>
-    <div style="flex:1;background:#222228;border-radius:3px;height:6px;overflow:hidden">
+    <div style="flex:1;background:#1e2d42;border-radius:3px;height:6px;overflow:hidden">
       <div style="width:{ow}%;height:100%;background:{bc};border-radius:3px"></div>
     </div>
     <span style="font-size:11px;color:#ef4444;width:42px;text-align:right">UNDER</span>
   </div>
-  <div style="display:flex;justify-content:space-between;font-size:11px;color:#44444f;margin-top:3px">
+  <div style="display:flex;justify-content:space-between;font-size:11px;color:#7a8fa8;margin-top:3px">
     <span>{ow}%</span><span>{uw}%</span>
   </div>
 </div>""", unsafe_allow_html=True)
@@ -312,7 +324,7 @@ def render():
         pass
     else:
         st.markdown("""
-<div style="background:#13131a;border:1px solid #1e1e28;border-radius:10px;padding:1.25rem 1.5rem;color:#44444f;font-size:13px">
+<div style="background:#131d2e;border:1px solid #1e2d42;border-radius:10px;padding:1.25rem 1.5rem;color:#7a8fa8;font-size:13px">
   Enter lines above to see over/under analysis across all prop markets.
 </div>
 """, unsafe_allow_html=True)
@@ -333,20 +345,20 @@ def render():
         bb   = int(pd.to_numeric(row.get("bb", 0), errors="coerce") or 0)
         log_rows += f"""
 <div class="gr">
-  <span style="color:#44444f;width:56px;font-size:12px">{d}</span>
-  <span style="color:#6b6b78;flex:1;font-size:12px">{row.get('team','')}</span>
-  <span style="color:#9090a0;width:36px;font-size:12px;text-align:right">{ip:.1f}</span>
-  <span style="color:#9090a0;width:28px;font-size:12px;text-align:right">{k}</span>
-  <span style="color:#9090a0;width:28px;font-size:12px;text-align:right">{er}</span>
-  <span style="color:#9090a0;width:28px;font-size:12px;text-align:right">{h}</span>
-  <span style="color:#9090a0;width:28px;font-size:12px;text-align:right">{bb}</span>
+  <span style="color:#7a8fa8;width:56px;font-size:12px">{d}</span>
+  <span style="color:#8090a8;flex:1;font-size:12px">{row.get('team','')}</span>
+  <span style="color:#96aec8;width:36px;font-size:12px;text-align:right">{ip:.1f}</span>
+  <span style="color:#96aec8;width:28px;font-size:12px;text-align:right">{k}</span>
+  <span style="color:#96aec8;width:28px;font-size:12px;text-align:right">{er}</span>
+  <span style="color:#96aec8;width:28px;font-size:12px;text-align:right">{h}</span>
+  <span style="color:#96aec8;width:28px;font-size:12px;text-align:right">{bb}</span>
   <span class="{vcls}" style="width:52px;text-align:right">{val:.0f} {"✓" if hit else "✗"}</span>
 </div>"""
 
     st.markdown(f"""
 <div class="card">
-  <div style="display:flex;padding:0 0 8px;border-bottom:1px solid #1e1e28;
-    font-size:11px;color:#44444f;letter-spacing:.04em;text-transform:uppercase">
+  <div style="display:flex;padding:0 0 8px;border-bottom:1px solid #1e2d42;
+    font-size:11px;color:#7a8fa8;letter-spacing:.04em;text-transform:uppercase">
     <span style="width:56px">Date</span>
     <span style="flex:1">Team</span>
     <span style="width:36px;text-align:right">IP</span>
