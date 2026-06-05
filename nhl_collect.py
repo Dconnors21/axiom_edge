@@ -61,6 +61,41 @@ def _get(url: str, retries: int = 3) -> dict:
         time.sleep(1.5 * (attempt + 1))
     return {}
 
+
+def parse_team_stats(rr: dict) -> dict:
+    """Extract per-team special-teams / physical stats from the gamecenter
+    right-rail `teamGameStats` block. The boxscore endpoint only exposes score
+    and sog; PP/PIM/hits/blocks live here, with powerPlay formatted as "G/Opp".
+    Returns Nones when a category is absent so callers can write NULLs safely."""
+    out = {k: None for k in (
+        "home_pp_goals", "home_pp_opp", "away_pp_goals", "away_pp_opp",
+        "home_pim", "away_pim", "home_hits", "away_hits",
+        "home_blocks", "away_blocks",
+    )}
+    stats = {s.get("category"): s for s in rr.get("teamGameStats", [])}
+
+    def _frac(val):
+        try:
+            g, o = str(val).split("/")
+            return int(g), int(o)
+        except Exception:
+            return None, None
+
+    def _int(val):
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return None
+
+    if "powerPlay" in stats:
+        out["home_pp_goals"], out["home_pp_opp"] = _frac(stats["powerPlay"].get("homeValue"))
+        out["away_pp_goals"], out["away_pp_opp"] = _frac(stats["powerPlay"].get("awayValue"))
+    for cat, key in [("pim", "pim"), ("hits", "hits"), ("blockedShots", "blocks")]:
+        if cat in stats:
+            out[f"home_{key}"] = _int(stats[cat].get("homeValue"))
+            out[f"away_{key}"] = _int(stats[cat].get("awayValue"))
+    return out
+
 def pull_team_season(team: str, season: str, conn) -> int:
     """Pull all completed games for a team+season from the NHL schedule API."""
     url  = f"{NHL_API}/club-schedule-season/{team}/{season}"
@@ -101,10 +136,11 @@ def pull_team_season(team: str, season: str, conn) -> int:
         gdiff    = h_score - a_score
         total    = h_score + a_score
 
-        # Fetch boxscore for shot/PP data
+        # Fetch boxscore for score/shot data + right-rail for special teams.
         box = _get(f"{NHL_API}/gamecenter/{gid}/boxscore")
         bh  = box.get("homeTeam", {})
         ba  = box.get("awayTeam", {})
+        ts  = parse_team_stats(_get(f"{NHL_API}/gamecenter/{gid}/right-rail"))
 
         # Detect OT/SO
         periods = box.get("periodDescriptor", {})
@@ -123,11 +159,11 @@ def pull_team_season(team: str, season: str, conn) -> int:
             gid, gdate, str(season_str), h_team, a_team,
             h_score, a_score, h_win, gdiff, total, game_type,
             bh.get("sog"),         ba.get("sog"),
-            bh.get("ppGoals"),     bh.get("ppOpportunities"),
-            ba.get("ppGoals"),     ba.get("ppOpportunities"),
-            bh.get("pim"),         ba.get("pim"),
-            bh.get("hits"),        ba.get("hits"),
-            bh.get("blocks"),      ba.get("blocks"),
+            ts["home_pp_goals"],   ts["home_pp_opp"],
+            ts["away_pp_goals"],   ts["away_pp_opp"],
+            ts["home_pim"],        ts["away_pim"],
+            ts["home_hits"],       ts["away_hits"],
+            ts["home_blocks"],     ts["away_blocks"],
             went_ot,
         ))
         existing.add(gid)

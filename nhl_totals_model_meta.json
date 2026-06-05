@@ -27,7 +27,7 @@
     "home_advantage"
   ],
   "target": "total_goals",
-  "rmse": 2.373627818389638,
+  "rmse": 2.3682238636135047,
   "skill": 0.0,
-  "trained_at": "2026-06-02T13:09:28.033161"
+  "trained_at": "2026-06-04T23:03:33.671740"
 }
