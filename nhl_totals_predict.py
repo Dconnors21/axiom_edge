@@ -10,6 +10,7 @@ import json
 from datetime import date, datetime, timezone, timedelta
 from nhl_config import NHL_DB_PATH, MIN_EDGE, KELLY_FRACTION, NHL_NAME_TO_ABBREV
 from nhl_train_totals import TOTALS_FEATURE_COLS
+import market_signal as ms
 
 def get_conn():
     return sqlite3.connect(NHL_DB_PATH)
@@ -61,9 +62,16 @@ def init_totals_predictions(conn):
             under_price       REAL,
             bookmaker         TEXT,
             actual_total      REAL,
+            market_flag       TEXT,
+            market_move       REAL,
             PRIMARY KEY (game_id, predict_date)
         )
     """)
+    for col, decl in [("market_flag", "TEXT"), ("market_move", "REAL")]:
+        try:
+            conn.execute(f"ALTER TABLE nhl_totals_predictions ADD COLUMN {col} {decl}")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
 
 def load_todays_totals_odds(conn):
@@ -133,6 +141,14 @@ def main():
     saved    = 0
     value_ct = 0
 
+    try:
+        sigs = ms.compute_signals(
+            conn, "nhl_totals_odds", "total",
+            point_col="total_line", market_filter=None)
+    except Exception as e:
+        print(f"  Market signals skipped: {e}")
+        sigs = {}
+
     for _, row in odds_df.iterrows():
         home      = _abbrev(row["home_team"])
         away      = _abbrev(row["away_team"])
@@ -179,6 +195,21 @@ def main():
         val_over   = 1 if edge_over  >= MIN_EDGE else 0
         val_under  = 1 if edge_under >= MIN_EDGE else 0
 
+        # Market signal soft gate (side A = over).
+        sig = sigs.get(str(gid))
+        if val_over:
+            pick_a = True
+        elif val_under:
+            pick_a = False
+        else:
+            pick_a = edge_over >= edge_under
+        mult, mkt_flag, mkt_move = ms.gate_pick(sig, pick_a)
+        if mult < 1.0:
+            if pick_a: k_over  *= mult
+            else:      k_under *= mult
+        if mkt_flag:
+            print(f"  Market: {away} @ {home} {mkt_flag} ({ms.describe(sig)})")
+
         if val_over or val_under:
             value_ct += 1
             side = "OVER" if val_over else "UNDER"
@@ -187,7 +218,7 @@ def main():
 
         conn.execute("""
             INSERT OR REPLACE INTO nhl_totals_predictions VALUES (
-                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
             )
         """, (
             gid, today, home, away, ct,
@@ -199,6 +230,7 @@ def main():
             round(k_over,  4), round(k_under, 4),
             o_price, u_price, row["bookmaker"],
             None,
+            mkt_flag, round(float(mkt_move), 4),
         ))
         saved += 1
 

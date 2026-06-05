@@ -9,6 +9,7 @@ import pickle
 import json
 from datetime import date, datetime, timezone, timedelta
 from nhl_config import NHL_DB_PATH, MIN_EDGE, KELLY_FRACTION, NHL_NAME_TO_ABBREV
+import market_signal as ms
 
 PUCK_LINE = -1.5  # home team always -1.5 (must win by 2+)
 
@@ -62,9 +63,16 @@ def init_spread_predictions(conn):
             away_price           REAL,
             bookmaker            TEXT,
             actual_home_covered  INTEGER,
+            market_flag          TEXT,
+            market_move          REAL,
             PRIMARY KEY (game_id, predict_date)
         )
     """)
+    for col, decl in [("market_flag", "TEXT"), ("market_move", "REAL")]:
+        try:
+            conn.execute(f"ALTER TABLE nhl_spread_predictions ADD COLUMN {col} {decl}")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
 
 def load_todays_spread_odds(conn):
@@ -131,6 +139,14 @@ def main():
     saved    = 0
     value_ct = 0
 
+    try:
+        sigs = ms.compute_signals(
+            conn, "nhl_spread_odds", "spread",
+            point_col="home_point", market_filter=None)
+    except Exception as e:
+        print(f"  Market signals skipped: {e}")
+        sigs = {}
+
     for _, row in odds_df.iterrows():
         home_full = row["home_team"]
         away_full = row["away_team"]
@@ -170,6 +186,21 @@ def main():
         val_home     = 1 if edge_home >= MIN_EDGE else 0
         val_away     = 1 if edge_away >= MIN_EDGE else 0
 
+        # Market signal soft gate (side A = home cover).
+        sig = sigs.get(str(gid))
+        if val_home:
+            pick_a = True
+        elif val_away:
+            pick_a = False
+        else:
+            pick_a = edge_home >= edge_away
+        mult, mkt_flag, mkt_move = ms.gate_pick(sig, pick_a)
+        if mult < 1.0:
+            if pick_a: kelly_home *= mult
+            else:      kelly_away *= mult
+        if mkt_flag:
+            print(f"  Market: {away} @ {home} {mkt_flag} ({ms.describe(sig)})")
+
         if val_home or val_away:
             value_ct += 1
             side  = f"{home} {fmt(h_point)}" if val_home else f"{away} +{abs(PUCK_LINE)}"
@@ -178,7 +209,7 @@ def main():
 
         conn.execute("""
             INSERT OR REPLACE INTO nhl_spread_predictions VALUES (
-                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
             )
         """, (
             gid, today, home, away, ct,
@@ -190,6 +221,7 @@ def main():
             round(kelly_home, 4), round(kelly_away, 4),
             h_price, a_price, row["bookmaker"],
             None,
+            mkt_flag, round(float(mkt_move), 4),
         ))
         saved += 1
 

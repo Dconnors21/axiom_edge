@@ -147,9 +147,18 @@ def build_player_features(props_df, conn, feature_cols) -> pd.DataFrame:
     player_lookup = {norm_name(n): grp
                      for n, grp in logs.groupby("player_name")}
 
+    out_players = set()
+    try:
+        from lineup_injury import get_out_players
+        out_players = get_out_players(conn)
+    except Exception:
+        pass
+
     rows = []
     for _, prop in props_df.iterrows():
         pname = prop["player_name"]
+        if norm_name(pname) in out_players:
+            continue  # player ruled Out — no prop bet
         hist  = player_lookup.get(norm_name(pname))
 
         if hist is None or len(hist) < 3:

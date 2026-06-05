@@ -14,6 +14,7 @@ from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 from scipy.stats import norm
 from mlb_config import MLB_DB_PATH, MIN_EDGE, KELLY_FRACTION, SHARP_BOOKS, FEATURE_COLS
+import market_signal as ms
 
 MLB_NAME_TO_ABBREV = {
     "Arizona Diamondbacks": "ARI", "Atlanta Braves": "ATL",
@@ -243,6 +244,26 @@ def generate_predictions(features_df, model, feature_cols, run_lines_df, sigma):
     return results
 
 
+def add_market_signals(results, conn):
+    """Annotate run line picks with line movement + soft gate (Kelly haircut
+    when the spread moves against our side). Adds market_flag / market_move."""
+    try:
+        sigs = ms.compute_signals(
+            conn, "mlb_spread_odds", "spread",
+            point_col="home_point", market_filter=None,
+            sharp_books=SHARP_BOOKS)
+    except Exception as e:
+        print(f"  Market signals skipped: {e}")
+        results["market_flag"] = ""
+        results["market_move"] = 0.0
+        return results
+    return ms.annotate_results(
+        results, sigs,
+        value_a="home_ats_value", value_b="away_ats_value",
+        kelly_a="home_ats_kelly", kelly_b="away_ats_kelly",
+        edge_a="home_ats_edge",  edge_b="away_ats_edge")
+
+
 def save_predictions(results, conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS mlb_spread_predictions (
@@ -269,9 +290,16 @@ def save_predictions(results, conn):
             spread_sigma      REAL,
             bookmaker         TEXT,
             actual_home_cover INTEGER,
+            market_flag       TEXT,
+            market_move       REAL,
             PRIMARY KEY (game_id, predict_date)
         )
     """)
+    for col, decl in [("market_flag", "TEXT"), ("market_move", "REAL")]:
+        try:
+            conn.execute(f"ALTER TABLE mlb_spread_predictions ADD COLUMN {col} {decl}")
+        except sqlite3.OperationalError:
+            pass
     today = date.today().isoformat()
     conn.execute("DELETE FROM mlb_spread_predictions WHERE predict_date=?", (today,))
 
@@ -285,6 +313,7 @@ def save_predictions(results, conn):
         "home_ats_edge","away_ats_edge","home_ats_value","away_ats_value",
         "home_ats_kelly","away_ats_kelly","home_price","away_price",
         "spread_sigma","bookmaker","actual_home_cover",
+        "market_flag","market_move",
     ]]
     results[save_cols].to_sql("mlb_spread_predictions", conn,
                               if_exists="append", index=False, chunksize=50)
@@ -325,6 +354,7 @@ if __name__ == "__main__":
         exit()
 
     results = generate_predictions(features_df, model, feature_cols, run_lines, sigma)
+    results = add_market_signals(results, conn)
 
     value_count = int(results["home_ats_value"].sum() + results["away_ats_value"].sum())
     print(f"\n{'='*60}")

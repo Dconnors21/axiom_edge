@@ -13,6 +13,7 @@ import json
 from datetime import datetime, date, timezone, timedelta
 from scipy.stats import norm
 from config import DB_PATH, MIN_EDGE, KELLY_FRACTION, SHARP_BOOKS
+import market_signal as ms
 
 def get_conn():
     return sqlite3.connect(DB_PATH)
@@ -209,6 +210,26 @@ def generate_spread_predictions(today_features, model, feature_cols, spreads_df,
     return results
 
 
+def add_market_signals(results, conn):
+    """Annotate ATS picks with spread line movement + soft gate (Kelly haircut
+    when the line moves against our side). Adds market_flag / market_move."""
+    try:
+        sigs = ms.compute_signals(
+            conn, "odds", "spread",
+            point_col="home_point", market_filter="spreads",
+            sharp_books=SHARP_BOOKS)
+    except Exception as e:
+        print(f"  Market signals skipped: {e}")
+        results["market_flag"] = ""
+        results["market_move"] = 0.0
+        return results
+    return ms.annotate_results(
+        results, sigs,
+        value_a="home_ats_value", value_b="away_ats_value",
+        kelly_a="home_ats_kelly", kelly_b="away_ats_kelly",
+        edge_a="home_ats_edge",  edge_b="away_ats_edge")
+
+
 # ── Save predictions ──────────────────────────────────────────────────────────
 
 def save_spread_predictions(results, conn):
@@ -237,9 +258,16 @@ def save_spread_predictions(results, conn):
             spread_sigma      REAL,
             bookmaker         TEXT,
             actual_home_cover INTEGER,
+            market_flag       TEXT,
+            market_move       REAL,
             PRIMARY KEY (game_id, predict_date)
         )
     """)
+    for col, decl in [("market_flag", "TEXT"), ("market_move", "REAL")]:
+        try:
+            conn.execute(f"ALTER TABLE spread_predictions ADD COLUMN {col} {decl}")
+        except sqlite3.OperationalError:
+            pass
     today = date.today().isoformat()
     conn.execute("DELETE FROM spread_predictions WHERE predict_date = ?", (today,))
 
@@ -253,6 +281,7 @@ def save_spread_predictions(results, conn):
         "home_ats_edge","away_ats_edge","home_ats_value","away_ats_value",
         "home_ats_kelly","away_ats_kelly","home_price","away_price",
         "spread_sigma","bookmaker","actual_home_cover",
+        "market_flag","market_move",
     ]]
     results[save_cols].to_sql("spread_predictions", conn, if_exists="append",
                               index=False, chunksize=50)
@@ -330,6 +359,7 @@ if __name__ == "__main__":
         exit()
 
     results = generate_spread_predictions(today_features, model, feature_cols, spreads_df, sigma)
+    results = add_market_signals(results, conn)
     print_report(results)
     save_spread_predictions(results, conn)
 

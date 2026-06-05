@@ -13,6 +13,7 @@ from datetime import datetime, date, timezone, timedelta
 from pathlib import Path
 from scipy.stats import norm
 from mlb_config import MLB_DB_PATH, MIN_EDGE, KELLY_FRACTION, SHARP_BOOKS
+import market_signal as ms
 
 MLB_NAME_TO_ABBREV = {
     "Arizona Diamondbacks": "ARI", "Atlanta Braves": "ATL",
@@ -238,6 +239,26 @@ def generate_predictions(features_df, model, feature_cols, totals_df, sigma, ski
     return results
 
 
+def add_market_signals(results, conn):
+    """Annotate totals picks with line movement + soft gate (Kelly haircut when
+    the total moves against our side). Adds market_flag / market_move."""
+    try:
+        sigs = ms.compute_signals(
+            conn, "mlb_totals_odds", "total",
+            point_col="total_line", market_filter=None,
+            sharp_books=SHARP_BOOKS)
+    except Exception as e:
+        print(f"  Market signals skipped: {e}")
+        results["market_flag"] = ""
+        results["market_move"] = 0.0
+        return results
+    return ms.annotate_results(
+        results, sigs,
+        value_a="over_value", value_b="under_value",
+        kelly_a="over_kelly", kelly_b="under_kelly",
+        edge_a="over_edge",  edge_b="under_edge")
+
+
 def save_predictions(results, conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS mlb_totals_predictions (
@@ -263,9 +284,16 @@ def save_predictions(results, conn):
             totals_sigma   REAL,
             bookmaker      TEXT,
             actual_total   REAL,
+            market_flag    TEXT,
+            market_move    REAL,
             PRIMARY KEY (game_id, predict_date)
         )
     """)
+    for col, decl in [("market_flag", "TEXT"), ("market_move", "REAL")]:
+        try:
+            conn.execute(f"ALTER TABLE mlb_totals_predictions ADD COLUMN {col} {decl}")
+        except sqlite3.OperationalError:
+            pass
     today = date.today().isoformat()
     conn.execute("DELETE FROM mlb_totals_predictions WHERE predict_date=?", (today,))
 
@@ -278,6 +306,7 @@ def save_predictions(results, conn):
         "over_fair","under_fair","over_edge","under_edge",
         "over_value","under_value","over_kelly","under_kelly",
         "over_price","under_price","totals_sigma","bookmaker","actual_total",
+        "market_flag","market_move",
     ]]
     results[save_cols].to_sql("mlb_totals_predictions", conn,
                               if_exists="append", index=False, chunksize=50)
@@ -323,6 +352,7 @@ if __name__ == "__main__":
         exit()
 
     results = generate_predictions(features_df, model, feature_cols, totals_df, sigma, skill)
+    results = add_market_signals(results, conn)
 
     print(f"\n{'='*60}")
     print(f"  MLB TOTALS PICKS")

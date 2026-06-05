@@ -99,6 +99,7 @@ def _get_best(preds: pd.DataFrame, min_edge: float):
                 "away_pitcher":  game.get("away_pitcher"),
                 "home_era":      game.get("home_era"),
                 "away_era":      game.get("away_era"),
+                "market_flag":   str(game.get("market_flag", "") or ""),
             })
     if not candidates:
         return None
@@ -121,8 +122,16 @@ def _ladder_str(price) -> str:
     except Exception:
         return "—"
 
+def _market_field(p):
+    """Optional '📈 Market' field when a line-movement signal is attached."""
+    flag = str(p.get("market_flag", "") or "").strip()
+    if not flag:
+        return None
+    return {"name": "📈 Market", "value": flag, "inline": True}
+
+
 def _ml_headline(p, cfg) -> list:
-    return [
+    fields = [
         {"name": "🎯 Best Bet — Moneyline", "value": f"**{p['bet_team']}** `{_fmt_price(p['price'])}`", "inline": True},
         {"name": cfg["tip"],          "value": _fmt_tip(p["commence_time"]) or "—",     "inline": True},
         {"name": "📚 Book",           "value": p["bookmaker"] or "—",                   "inline": True},
@@ -133,13 +142,16 @@ def _ml_headline(p, cfg) -> list:
         {"name": "🪜 Ladder",         "value": _ladder_str(p["price"]),                 "inline": True},
         {"name": "🏟️ Matchup",       "value": f"{p['away_team']} @ {p['home_team']}",   "inline": False},
     ]
+    mf = _market_field(p)
+    if mf: fields.insert(-1, mf)
+    return fields
 
 def _ats_headline(p, cfg) -> list:
     spr = f"{p['spread']:+.1f}" if p.get("spread") is not None else ""
     margin = ""
     if cfg.get("margin_unit") and p.get("pred_home_margin") is not None:
         margin = f"  ·  Pred margin: {p['pred_home_margin']:+.1f} {cfg['margin_unit']}"
-    return [
+    fields = [
         {"name": f"🎯 Best Bet — {cfg['spread_short']}", "value": f"**{p['bet_team']} {spr}** `{_fmt_price(p['price'])}`", "inline": True},
         {"name": cfg["tip"],        "value": _fmt_tip(p.get("commence_time", "")) or "—", "inline": True},
         {"name": "📚 Book",         "value": (str(p.get("bookmaker")) or "—").upper(),    "inline": True},
@@ -148,11 +160,14 @@ def _ats_headline(p, cfg) -> list:
         {"name": "💰 Kelly Stake",  "value": f"{p['kelly']*100:.1f}% of bankroll",        "inline": True},
         {"name": "🏟️ Matchup",     "value": f"{p['away_team']} @ {p['home_team']}{margin}", "inline": False},
     ]
+    mf = _market_field(p)
+    if mf: fields.insert(-1, mf)
+    return fields
 
 def _total_headline(p, cfg) -> list:
     side = "OVER" if p["side"] == "over" else "UNDER"
     line = f"{p['total_line']:.1f}" if p.get("total_line") is not None else "N/A"
-    return [
+    fields = [
         {"name": "🎯 Best Bet — Total", "value": f"**{side} {line}** `{_fmt_price(p['price'])}`", "inline": True},
         {"name": cfg["tip"],        "value": _fmt_tip(p.get("commence_time", "")) or "—", "inline": True},
         {"name": "📚 Book",         "value": (str(p.get("bookmaker")) or "—").upper(),    "inline": True},
@@ -161,11 +176,19 @@ def _total_headline(p, cfg) -> list:
         {"name": "💰 Kelly Stake",  "value": f"{p['kelly']*100:.1f}% of bankroll",        "inline": True},
         {"name": "🏟️ Matchup",     "value": f"{p['away_team']} @ {p['home_team']}  ·  Pred total: {p['pred_total']:.1f} {cfg['total_unit']}", "inline": False},
     ]
+    mf = _market_field(p)
+    if mf: fields.insert(-1, mf)
+    return fields
+
+def _market_suffix(p) -> str:
+    flag = str(p.get("market_flag", "") or "").strip()
+    return f"  · 📈 {flag}" if flag else ""
 
 def _ml_compact(p, cfg) -> dict:
     return {"name": "💵 Moneyline Pick", "inline": False, "value": (
         f"**{p['bet_team']}** `{_fmt_price(p['price'])}`  "
         f"Model: {p['prob']:.1%}  Edge: **{p['edge']:+.1%}**  Kelly: {p['kelly']*100:.1f}%"
+        f"{_market_suffix(p)}"
     )}
 
 def _ats_compact(p, cfg) -> dict:
@@ -176,6 +199,7 @@ def _ats_compact(p, cfg) -> dict:
     return {"name": cfg["spread_label"], "inline": False, "value": (
         f"**{p['bet_team']} {spr}** `{_fmt_price(p['price'])}`  "
         f"P(cover): {p['cover_prob']:.1%}  Edge: **{p['edge']:+.1%}**{margin}"
+        f"{_market_suffix(p)}"
     )}
 
 def _total_compact(p, cfg) -> dict:
@@ -185,6 +209,7 @@ def _total_compact(p, cfg) -> dict:
         f"**{side} {line}** `{_fmt_price(p['price'])}`  "
         f"P(hit): {p['ou_prob']:.1%}  Edge: **{p['edge']:+.1%}**  "
         f"Pred total: {p['pred_total']:.1f} {cfg['total_unit']}"
+        f"{_market_suffix(p)}"
     )}
 
 _HEADLINE = {"ml": _ml_headline, "ats": _ats_headline, "total": _total_headline}
@@ -246,6 +271,7 @@ def _get_best_ats(spread_preds: pd.DataFrame, min_edge: float):
                 "price":            price,
                 "commence_time":    g.get("commence_time", ""),
                 "bookmaker":        str(g.get("bookmaker", "")),
+                "market_flag":      str(g.get("market_flag", "") or ""),
             })
     if not candidates:
         return None
@@ -463,6 +489,7 @@ def _get_best_total(totals_preds: pd.DataFrame, min_edge: float):
                 "edge":       edge,
                 "kelly":      kelly,
                 "price":      price,
+                "market_flag": str(g.get("market_flag", "") or ""),
             })
     if not candidates:
         return None
@@ -724,6 +751,7 @@ def _get_best_nhl_spread(spread_preds: pd.DataFrame, min_edge: float):
                 "price":         price,
                 "commence_time": g.get("commence_time", ""),
                 "bookmaker":     str(g.get("bookmaker", "")).upper(),
+                "market_flag":   str(g.get("market_flag", "") or ""),
             })
     if not candidates:
         return None

@@ -69,6 +69,13 @@ def fetch_via_nba_api():
 
 # ── Source 2: ESPN API ────────────────────────────────────────────────────────
 
+# ESPN uses a few non-standard team abbreviations; map them to the nba_api
+# standard used everywhere else in the DB (player_game_logs, games_featured).
+_ESPN_ABBREV_FIX = {
+    "GS": "GSW", "NO": "NOP", "NY": "NYK",
+    "SA": "SAS", "UTAH": "UTA", "WSH": "WAS",
+}
+
 def fetch_via_espn():
     """Try the ESPN hidden API — works with proper headers."""
     try:
@@ -91,15 +98,20 @@ def fetch_via_espn():
         rows = []
 
         for team in data.get("injuries", []):
-            team_abbrev = team.get("team", {}).get("abbreviation", "")
-            team_name   = team.get("team", {}).get("displayName", "")
+            # ESPN nests the team name at the top level (displayName) but the
+            # abbreviation lives on each athlete's team object — the top-level
+            # "team" key is an empty {}.
+            group_name = team.get("displayName", "")
 
             for injury in team.get("injuries", []):
-                athlete = injury.get("athlete", {})
+                athlete   = injury.get("athlete", {})
+                ath_team  = athlete.get("team", {})
+                abbrev    = ath_team.get("abbreviation","")
+                abbrev    = _ESPN_ABBREV_FIX.get(abbrev, abbrev)
                 rows.append({
                     "player_name": athlete.get("displayName",""),
-                    "team_abbrev": team_abbrev,
-                    "team_name":   team_name,
+                    "team_abbrev": abbrev,
+                    "team_name":   ath_team.get("displayName", group_name),
                     "status":      injury.get("status",""),
                     "reason":      injury.get("longComment",
                                    injury.get("shortComment","")),
@@ -177,14 +189,26 @@ def calculate_impact(injuries_df: pd.DataFrame, conn) -> pd.DataFrame:
     if injuries_df.empty:
         return pd.DataFrame()
 
-    # Get average minutes per player this season to identify key players
-    player_mins = pd.read_sql("""
-        SELECT player_name, AVG(min) as avg_min
-        FROM player_stats
-        WHERE season = '2025-26'
-        GROUP BY player_name
-        HAVING avg_min > 0
-    """, conn)
+    # Get average minutes per player (latest season) to identify key players.
+    # Uses player_game_logs (the table we actually populate); season-agnostic so
+    # this keeps working across seasons without a hardcoded year.
+    try:
+        latest_season = pd.read_sql(
+            "SELECT MAX(season) AS s FROM player_game_logs", conn
+        )["s"].iloc[0]
+    except Exception:
+        latest_season = None
+
+    if latest_season:
+        player_mins = pd.read_sql("""
+            SELECT player_name, AVG(min_played) as avg_min
+            FROM player_game_logs
+            WHERE season = ?
+            GROUP BY player_name
+            HAVING avg_min > 0
+        """, conn, params=(latest_season,))
+    else:
+        player_mins = pd.DataFrame(columns=["player_name", "avg_min"])
     key_threshold = 28.0  # avg minutes threshold for "key player"
 
     impact_rows = []
@@ -192,6 +216,7 @@ def calculate_impact(injuries_df: pd.DataFrame, conn) -> pd.DataFrame:
         "out":           1.0,
         "doubtful":      0.75,
         "questionable":  0.4,
+        "day-to-day":    0.4,   # ESPN's most common non-Out status
         "game time":     0.3,
         "available":     0.0,
         "probable":      0.1,
@@ -201,7 +226,7 @@ def calculate_impact(injuries_df: pd.DataFrame, conn) -> pd.DataFrame:
         out_count          = (group["status"].str.lower() == "out").sum()
         doubtful_count     = (group["status"].str.lower() == "doubtful").sum()
         questionable_count = (group["status"].str.lower().isin(
-            ["questionable","game time"])).sum()
+            ["questionable","game time","day-to-day"])).sum()
 
         # Calculate weighted impact
         total_impact = 0
@@ -263,6 +288,21 @@ def save_injuries(injuries_df: pd.DataFrame, impact_df: pd.DataFrame,
           f"{len(impact_df)} team impact scores.")
 
 # ── Update features with injury context ───────────────────────────────────────
+
+def get_out_players(conn) -> set:
+    """Returns a set of normalized (lower/stripped) player names listed as 'Out'
+    in today's injury report. Used by the props pipelines to suppress bets on
+    players who won't take the floor. Returns an empty set if no report exists."""
+    today = date.today().isoformat()
+    try:
+        df = pd.read_sql("""
+            SELECT player_name FROM injury_report
+            WHERE report_date = ? AND LOWER(status) = 'out'
+        """, conn, params=(today,))
+    except Exception:
+        return set()
+    return {str(n).lower().strip() for n in df["player_name"] if n}
+
 
 def get_injury_features_for_prediction(conn) -> dict:
     """
@@ -327,6 +367,9 @@ if __name__ == "__main__":
                         help="Force manual injury entry")
     parser.add_argument("--show", action="store_true",
                         help="Show today's stored injury report")
+    parser.add_argument("--no-manual", action="store_true",
+                        help="Never fall back to interactive manual entry "
+                             "(use in automated pipelines so it can't block)")
     args = parser.parse_args()
 
     print("\n── NBA Lineup & Injury Report ───────────────────────────")
@@ -373,6 +416,9 @@ if __name__ == "__main__":
             injuries_df = fetch_via_espn()
             if not injuries_df.empty:
                 source = "ESPN"
+            elif args.no_manual:
+                print("  Automated sources unavailable — skipping manual entry "
+                      "(--no-manual). Keeping prior injury data, if any.")
             else:
                 print("  Automated sources unavailable.")
                 print("  Falling back to manual entry.")

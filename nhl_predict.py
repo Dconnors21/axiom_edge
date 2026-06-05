@@ -9,6 +9,7 @@ import pickle
 import json
 from datetime import date, datetime, timezone, timedelta
 from nhl_config import NHL_DB_PATH, MIN_EDGE, KELLY_FRACTION, NHL_NAME_TO_ABBREV
+import market_signal as ms
 
 def get_conn():
     return sqlite3.connect(NHL_DB_PATH)
@@ -58,9 +59,16 @@ def init_predictions(conn):
             away_price       REAL,
             bookmaker        TEXT,
             actual_home_win  INTEGER,
+            market_flag      TEXT,
+            market_move      REAL,
             PRIMARY KEY (game_id, predict_date)
         )
     """)
+    for col, decl in [("market_flag", "TEXT"), ("market_move", "REAL")]:
+        try:
+            conn.execute(f"ALTER TABLE nhl_predictions ADD COLUMN {col} {decl}")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
 
 def load_todays_odds(conn):
@@ -136,6 +144,15 @@ def main():
     saved     = 0
     value_ct  = 0
 
+    try:
+        sigs = ms.compute_signals(
+            conn, "nhl_odds", "h2h",
+            price_a_col="home_price", price_b_col="away_price",
+            market_filter="h2h")
+    except Exception as e:
+        print(f"  Market signals skipped: {e}")
+        sigs = {}
+
     for _, row in odds_df.iterrows():
         home_full = row["home_team"]
         away_full = row["away_team"]
@@ -179,6 +196,22 @@ def main():
         val_home     = 1 if edge_home >= MIN_EDGE else 0
         val_away     = 1 if edge_away >= MIN_EDGE else 0
 
+        # Market signal soft gate (side A = home). Pick the value side, else the
+        # higher-edge side, then haircut its Kelly if the line moved against it.
+        sig = sigs.get(str(gid))
+        if val_home:
+            pick_a = True
+        elif val_away:
+            pick_a = False
+        else:
+            pick_a = edge_home >= edge_away
+        mult, mkt_flag, mkt_move = ms.gate_pick(sig, pick_a)
+        if mult < 1.0:
+            if pick_a: kelly_home *= mult
+            else:      kelly_away *= mult
+        if mkt_flag:
+            print(f"  Market: {away} @ {home} {mkt_flag} ({ms.describe(sig)})")
+
         if val_home or val_away:
             value_ct += 1
             side = home if val_home else away
@@ -187,7 +220,7 @@ def main():
 
         conn.execute("""
             INSERT OR REPLACE INTO nhl_predictions VALUES (
-                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
             )
         """, (
             gid, today, home, away, ct,
@@ -198,6 +231,7 @@ def main():
             round(kelly_home, 4), round(kelly_away, 4),
             h_price, a_price, row["bookmaker"],
             None,
+            mkt_flag, round(float(mkt_move), 4),
         ))
         saved += 1
 

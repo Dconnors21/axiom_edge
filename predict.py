@@ -11,6 +11,7 @@ import pickle
 import json
 from datetime import datetime, date, timezone, timedelta
 from config import DB_PATH, MIN_EDGE, KELLY_FRACTION, SHARP_BOOKS
+import market_signal as ms
 
 def get_conn():
     return sqlite3.connect(DB_PATH)
@@ -140,6 +141,9 @@ def build_today_features(odds_df: pd.DataFrame, conn, feature_cols: list) -> pd.
             "home_team":     home_team,
             "away_team":     away_team,
             "commence_time": game["commence_time"],
+            # carried through for the serve-time injury nudge (not model inputs)
+            "home_abbr":     str(home_stats.get("team_abbreviation", "")).strip(),
+            "away_abbr":     str(away_stats.get("team_abbreviation", "")).strip(),
         }
 
         for col in feature_cols:
@@ -163,9 +167,55 @@ def build_today_features(odds_df: pd.DataFrame, conn, feature_cols: list) -> pd.
 
     return pd.DataFrame(rows)
 
+# ── Serve-time injury adjustment ──────────────────────────────────────────────
+# The team model is NOT trained on injury features (they don't appear in
+# train.py's FEATURE_COLS), and we have no point-in-time historical injury data
+# to train on without leakage. So injuries are applied here as a bounded,
+# transparent nudge to the model's win probability for tonight's games only.
+#   delta = INJURY_NUDGE_MAX * (away_impact - home_impact)
+# A positive delta means the away team is more banged up → shift toward the home
+# team. impact_score is 0–1 (key-player injuries already weighted in
+# lineup_injury.calculate_impact), so the swing is capped at ±INJURY_NUDGE_MAX.
+
+INJURY_NUDGE_MAX = 0.08  # max probability shift when one team is fully impacted
+
+def apply_injury_nudge(today_features, conn):
+    """Adjust model_home_prob/model_away_prob in place using today's injuries.
+    Returns the number of games whose probability was moved."""
+    if conn is None:
+        return 0
+    try:
+        from lineup_injury import get_injury_features_for_prediction
+        inj = get_injury_features_for_prediction(conn)
+    except Exception as e:
+        print(f"  Injury nudge skipped (no injury data): {e}")
+        return 0
+    if not inj:
+        print("  No injury data for today — predictions unadjusted.")
+        return 0
+
+    adjusted = 0
+    for idx, row in today_features.iterrows():
+        h = inj.get(str(row.get("home_abbr", "")), {})
+        a = inj.get(str(row.get("away_abbr", "")), {})
+        h_imp = float(h.get("impact_score", 0.0))
+        a_imp = float(a.get("impact_score", 0.0))
+        delta = INJURY_NUDGE_MAX * (a_imp - h_imp)
+        if abs(delta) < 1e-6:
+            continue
+        new_h = min(max(float(today_features.at[idx, "model_home_prob"]) + delta, 0.02), 0.98)
+        today_features.at[idx, "model_home_prob"] = new_h
+        today_features.at[idx, "model_away_prob"] = 1.0 - new_h
+        adjusted += 1
+        tag = " ⭐" if (h.get("star_out") or a.get("star_out")) else ""
+        print(f"  Injury nudge: {row['away_team']} @ {row['home_team']} "
+              f"home {delta:+.1%} (impact H={h_imp:.2f} A={a_imp:.2f}){tag}")
+    print(f"  Injury nudge applied to {adjusted} game(s).")
+    return adjusted
+
 # ── Generate predictions ──────────────────────────────────────────────────────
 
-def generate_predictions(today_features, model, feature_cols, odds_df):
+def generate_predictions(today_features, model, feature_cols, odds_df, conn=None):
     meta_cols = ["game_id", "home_team", "away_team", "commence_time"]
     X = today_features[feature_cols].fillna(0)
 
@@ -173,6 +223,9 @@ def generate_predictions(today_features, model, feature_cols, odds_df):
     today_features = today_features.copy()
     today_features["model_home_prob"] = probs[:, 1]
     today_features["model_away_prob"] = probs[:, 0]
+
+    # Apply injury context as a bounded post-model adjustment (leak-free).
+    apply_injury_nudge(today_features, conn)
 
     results = today_features[meta_cols + ["model_home_prob", "model_away_prob"]].merge(
         odds_df[["game_id", "home_price", "away_price",
@@ -194,6 +247,29 @@ def generate_predictions(today_features, model, feature_cols, odds_df):
     results["away_value"] = results["away_edge"] > MIN_EDGE
 
     return results
+
+# ── Market signals (line movement / soft gate) ────────────────────────────────
+
+def add_market_signals(results, conn):
+    """Annotate each game with today's moneyline movement and apply a soft gate:
+    when the consensus line is moving against our pick, haircut its Kelly stake.
+    Adds market_flag (str) and market_move (signed, oriented to our pick)."""
+    try:
+        sigs = ms.compute_signals(
+            conn, "odds", "h2h",
+            price_a_col="home_price", price_b_col="away_price",
+            market_filter="h2h", sharp_books=SHARP_BOOKS)
+    except Exception as e:
+        print(f"  Market signals skipped: {e}")
+        results["market_flag"] = ""
+        results["market_move"] = 0.0
+        return results
+
+    return ms.annotate_results(
+        results, sigs,
+        value_a="home_value", value_b="away_value",
+        kelly_a="home_kelly", kelly_b="away_kelly",
+        edge_a="home_edge",  edge_b="away_edge")
 
 # ── Pretty print report ───────────────────────────────────────────────────────
 
@@ -251,6 +327,10 @@ def print_report(results):
         if not game["home_value"] and not game["away_value"]:
             print(f"\n  ⚪ No value found — skip this game")
 
+        flag = game.get("market_flag", "")
+        if flag:
+            print(f"     📈 Market: {flag}")
+
         print()
 
     print(f"{'='*60}")
@@ -284,9 +364,17 @@ def save_predictions(results, conn):
             home_price       REAL,
             away_price       REAL,
             actual_home_win  INTEGER,
+            market_flag      TEXT,
+            market_move      REAL,
             PRIMARY KEY (game_id, predict_date)
         )
     """)
+    # Add market-signal columns to pre-existing tables (idempotent).
+    for col, decl in [("market_flag", "TEXT"), ("market_move", "REAL")]:
+        try:
+            conn.execute(f"ALTER TABLE predictions ADD COLUMN {col} {decl}")
+        except sqlite3.OperationalError:
+            pass  # column already exists
     today = date.today().isoformat()
 
     # Clear today's predictions first to avoid duplicates
@@ -299,7 +387,8 @@ def save_predictions(results, conn):
         "game_id","predict_date","home_team","away_team","commence_time",
         "model_home_prob","model_away_prob","home_fair_prob","away_fair_prob",
         "home_edge","away_edge","home_value","away_value","home_kelly","away_kelly",
-        "bookmaker","home_price","away_price","actual_home_win"
+        "bookmaker","home_price","away_price","actual_home_win",
+        "market_flag","market_move"
     ]]
     results[cols].to_sql("predictions", conn, if_exists="append",
                          index=False, chunksize=50)
@@ -331,7 +420,8 @@ if __name__ == "__main__":
         print("  Could not build features for tonight's games.")
         exit()
 
-    results = generate_predictions(today_features, model, feature_cols, odds_df)
+    results = generate_predictions(today_features, model, feature_cols, odds_df, conn)
+    results = add_market_signals(results, conn)
     value_count = print_report(results)
     save_predictions(results, conn)
 

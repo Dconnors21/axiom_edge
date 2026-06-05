@@ -31,12 +31,13 @@ def log(msg: str):
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
-def run(script: str, label: str) -> bool:
+def run(script: str, label: str, args: list = None) -> bool:
     log(f"Starting {label}...")
     start  = time.time()
     env    = {**os.environ, "PYTHONUTF8": "1"}
+    cmd    = [sys.executable, script] + (args or [])
     result = subprocess.run(
-        [sys.executable, script],
+        cmd,
         capture_output=True, text=True, encoding="utf-8",
         cwd=str(Path(__file__).parent), env=env
     )
@@ -129,6 +130,10 @@ def morning_pipeline():
         _clear_stale_predictions("nba.db", "props_threes_predictions", today)
         _clear_stale_predictions("nba.db", "props_stl_predictions",   today)
         _clear_stale_predictions("nba.db", "props_blk_predictions",   today)
+        # Pull injuries/inactives BEFORE predictions so the team model gets a
+        # serve-time nudge and props skip players ruled Out. --no-manual keeps
+        # the automated pipeline from ever blocking on interactive entry.
+        run("lineup_injury.py",  "NBA: injury/inactive report", ["--no-manual"])
         run("predict.py",        "NBA: generating moneyline picks")
         run("spread_predict.py", "NBA: generating ATS picks")
         run("totals_predict.py", "NBA: generating totals picks")
