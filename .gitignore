@@ -12,6 +12,7 @@ env/
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
 
 # Logs and archives
 logs/

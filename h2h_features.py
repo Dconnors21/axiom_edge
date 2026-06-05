@@ -10,9 +10,12 @@ import numpy as np
 from config import DB_PATH
 
 def get_conn():
-    return sqlite3.connect(DB_PATH)
+    # busy timeout so the final matchups rewrite waits out a transient read lock
+    # (e.g. the Streamlit dashboard) instead of failing with "database is locked".
+    return sqlite3.connect(DB_PATH, timeout=30)
 
 def build_h2h_features(conn) -> pd.DataFrame:
+    """DB-backed entry point: load matchups + games_featured, then compute H2H."""
     print("  Loading data...")
 
     matchups = pd.read_sql(
@@ -27,6 +30,15 @@ def build_h2h_features(conn) -> pd.DataFrame:
         ORDER BY game_date ASC
     """, conn, parse_dates=["game_date"])
 
+    return compute_h2h(matchups, games)
+
+
+def compute_h2h(matchups: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
+    """Core H2H computation over in-memory frames. Returns one row per game_id
+    with the 7 h2h_* feature columns. Callable directly from features.py so the
+    matchups table is written only once (with H2H already merged), avoiding a
+    second drop/replace that can deadlock against an open dashboard reader."""
+    matchups = matchups.sort_values("game_date").reset_index(drop=True)
     print(f"  Processing {len(matchups):,} matchups...")
 
     # Verify we have abbreviations in matchups
@@ -144,23 +156,28 @@ def _default_h2h(game_id):
         "h2h_last3_pdiff":     0.0,
     }
 
-def merge_and_save(h2h_df: pd.DataFrame, conn):
-    matchups = pd.read_sql("SELECT * FROM matchups", conn,
-                           parse_dates=["game_date"])
-
-    # Drop old H2H cols if they exist
+def attach_h2h(matchups: pd.DataFrame, h2h_df: pd.DataFrame) -> pd.DataFrame:
+    """Merge H2H columns onto a matchups frame, replacing any stale h2h_* cols
+    and filling missing values with neutral priors. Pure in-memory; used by both
+    the standalone save path and features.py."""
     old_h2h = [c for c in matchups.columns if c.startswith("h2h_")]
     if old_h2h:
         matchups = matchups.drop(columns=old_h2h)
 
     matchups = matchups.merge(h2h_df, on="game_id", how="left")
 
-    # Fill any remaining NaN
     for col in [c for c in matchups.columns if c.startswith("h2h_")]:
         if "win_rate" in col or "cover_rate" in col:
             matchups[col] = matchups[col].fillna(0.5)
         else:
             matchups[col] = matchups[col].fillna(0.0)
+    return matchups
+
+
+def merge_and_save(h2h_df: pd.DataFrame, conn):
+    matchups = pd.read_sql("SELECT * FROM matchups", conn,
+                           parse_dates=["game_date"])
+    matchups = attach_h2h(matchups, h2h_df)
 
     matchups.to_sql("matchups", conn, if_exists="replace", index=False)
     conn.commit()

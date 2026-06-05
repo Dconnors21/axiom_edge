@@ -407,6 +407,15 @@ if __name__ == "__main__":
     df = add_injury_features(df, injury_counts)
 
     matchups = build_matchup_features(df)
+
+    # Head-to-head history features (computed in-memory so matchups is written
+    # only once, with h2h already merged — avoids a second drop/replace that can
+    # deadlock against an open dashboard reader on nba.db).
+    print("  Building head-to-head features...")
+    from h2h_features import compute_h2h, attach_h2h
+    h2h_df   = compute_h2h(matchups, df)
+    matchups = attach_h2h(matchups, h2h_df)
+
     save_features(df, matchups, conn)
 
     print(f"\n── Feature summary ──────────────────────────────────────")
