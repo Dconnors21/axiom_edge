@@ -18,11 +18,14 @@ import pandas as pd
 # ── Constants ─────────────────────────────────────────────────────────────────
 NBA_DB       = Path("nba.db")
 MLB_DB       = Path("mlb.db")
+NHL_DB       = Path("nhl.db")
 NBA_MIN_EDGE = 0.03
 MLB_MIN_EDGE = 0.03
+NHL_MIN_EDGE = 0.03
 
 NBA_COLOR  = int("6366f1", 16)   # indigo  #6366f1
 MLB_COLOR  = int("22c55e", 16)   # green   #22c55e
+NHL_COLOR  = int("38bdf8", 16)   # sky     #38bdf8 (matches NHL dashboard)
 SKIP_COLOR = int("2a2a35", 16)   # dark gray (no pick)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -105,6 +108,114 @@ def _get_best(preds: pd.DataFrame, min_edge: float):
         x["edge"]
     ), reverse=True)
     return candidates[0]
+
+
+# ── Headline / market-pick rendering ──────────────────────────────────────────
+# The card headline is the single highest-edge value play across ALL markets
+# (moneyline / spread / totals), not forced to be the moneyline. Whichever market
+# wins the headline gets a full block; the remaining markets render compactly.
+
+def _ladder_str(price) -> str:
+    try:
+        return "Yes 🪜" if float(price) <= 250 else "No"
+    except Exception:
+        return "—"
+
+def _ml_headline(p, cfg) -> list:
+    return [
+        {"name": "🎯 Best Bet — Moneyline", "value": f"**{p['bet_team']}** `{_fmt_price(p['price'])}`", "inline": True},
+        {"name": cfg["tip"],          "value": _fmt_tip(p["commence_time"]) or "—",     "inline": True},
+        {"name": "📚 Book",           "value": p["bookmaker"] or "—",                   "inline": True},
+        {"name": "📈 Edge",           "value": f"**{p['edge']:+.1%}**",                 "inline": True},
+        {"name": "🤖 Model Prob",     "value": f"{p['prob']:.1%}",                      "inline": True},
+        {"name": "📊 Book Implied",   "value": f"{p['fair_prob']:.1%}",                 "inline": True},
+        {"name": "💰 Kelly Stake",    "value": f"{p['kelly']*100:.1f}% of bankroll",    "inline": True},
+        {"name": "🪜 Ladder",         "value": _ladder_str(p["price"]),                 "inline": True},
+        {"name": "🏟️ Matchup",       "value": f"{p['away_team']} @ {p['home_team']}",   "inline": False},
+    ]
+
+def _ats_headline(p, cfg) -> list:
+    spr = f"{p['spread']:+.1f}" if p.get("spread") is not None else ""
+    margin = ""
+    if cfg.get("margin_unit") and p.get("pred_home_margin") is not None:
+        margin = f"  ·  Pred margin: {p['pred_home_margin']:+.1f} {cfg['margin_unit']}"
+    return [
+        {"name": f"🎯 Best Bet — {cfg['spread_short']}", "value": f"**{p['bet_team']} {spr}** `{_fmt_price(p['price'])}`", "inline": True},
+        {"name": cfg["tip"],        "value": _fmt_tip(p.get("commence_time", "")) or "—", "inline": True},
+        {"name": "📚 Book",         "value": (str(p.get("bookmaker")) or "—").upper(),    "inline": True},
+        {"name": "📈 Edge",         "value": f"**{p['edge']:+.1%}**",                     "inline": True},
+        {"name": "📐 P(cover)",     "value": f"{p['cover_prob']:.1%}",                    "inline": True},
+        {"name": "💰 Kelly Stake",  "value": f"{p['kelly']*100:.1f}% of bankroll",        "inline": True},
+        {"name": "🏟️ Matchup",     "value": f"{p['away_team']} @ {p['home_team']}{margin}", "inline": False},
+    ]
+
+def _total_headline(p, cfg) -> list:
+    side = "OVER" if p["side"] == "over" else "UNDER"
+    line = f"{p['total_line']:.1f}" if p.get("total_line") is not None else "N/A"
+    return [
+        {"name": "🎯 Best Bet — Total", "value": f"**{side} {line}** `{_fmt_price(p['price'])}`", "inline": True},
+        {"name": cfg["tip"],        "value": _fmt_tip(p.get("commence_time", "")) or "—", "inline": True},
+        {"name": "📚 Book",         "value": (str(p.get("bookmaker")) or "—").upper(),    "inline": True},
+        {"name": "📈 Edge",         "value": f"**{p['edge']:+.1%}**",                     "inline": True},
+        {"name": "🎯 P(hit)",       "value": f"{p['ou_prob']:.1%}",                       "inline": True},
+        {"name": "💰 Kelly Stake",  "value": f"{p['kelly']*100:.1f}% of bankroll",        "inline": True},
+        {"name": "🏟️ Matchup",     "value": f"{p['away_team']} @ {p['home_team']}  ·  Pred total: {p['pred_total']:.1f} {cfg['total_unit']}", "inline": False},
+    ]
+
+def _ml_compact(p, cfg) -> dict:
+    return {"name": "💵 Moneyline Pick", "inline": False, "value": (
+        f"**{p['bet_team']}** `{_fmt_price(p['price'])}`  "
+        f"Model: {p['prob']:.1%}  Edge: **{p['edge']:+.1%}**  Kelly: {p['kelly']*100:.1f}%"
+    )}
+
+def _ats_compact(p, cfg) -> dict:
+    spr = f"{p['spread']:+.1f}" if p.get("spread") is not None else ""
+    margin = ""
+    if cfg.get("margin_unit") and p.get("pred_home_margin") is not None:
+        margin = f"  Pred margin: {p['pred_home_margin']:+.1f} {cfg['margin_unit']}"
+    return {"name": cfg["spread_label"], "inline": False, "value": (
+        f"**{p['bet_team']} {spr}** `{_fmt_price(p['price'])}`  "
+        f"P(cover): {p['cover_prob']:.1%}  Edge: **{p['edge']:+.1%}**{margin}"
+    )}
+
+def _total_compact(p, cfg) -> dict:
+    side = "OVER" if p["side"] == "over" else "UNDER"
+    line = f"{p['total_line']:.1f}" if p.get("total_line") is not None else "N/A"
+    return {"name": "🎯 Totals Pick", "inline": False, "value": (
+        f"**{side} {line}** `{_fmt_price(p['price'])}`  "
+        f"P(hit): {p['ou_prob']:.1%}  Edge: **{p['edge']:+.1%}**  "
+        f"Pred total: {p['pred_total']:.1f} {cfg['total_unit']}"
+    )}
+
+_HEADLINE = {"ml": _ml_headline, "ats": _ats_headline, "total": _total_headline}
+_COMPACT  = {"ml": _ml_compact,  "ats": _ats_compact,  "total": _total_compact}
+
+def _team_market_fields(best, ats_best, totals_best, cfg):
+    """Return (fields, picks) for the ML/spread/totals trio. The highest-edge
+    available pick becomes the headline block; the rest render compactly. Returns
+    ([], []) when no market qualifies, signalling a 'No Bet' card."""
+    picks = []
+    if best:        picks.append(("ml",    best,        float(best["edge"])))
+    if ats_best:    picks.append(("ats",   ats_best,    float(ats_best["edge"])))
+    if totals_best: picks.append(("total", totals_best, float(totals_best["edge"])))
+    if not picks:
+        return [], []
+    picks.sort(key=lambda x: x[2], reverse=True)
+    head_kind, head_pick, _ = picks[0]
+    fields = list(_HEADLINE[head_kind](head_pick, cfg))
+    for kind, p, _ in picks[1:]:
+        fields.append(_COMPACT[kind](p, cfg))
+    return fields, picks
+
+def _count_value(df) -> int:
+    """Games in a predictions frame that carry at least one value flag, across
+    whatever *_value columns it has (home_value/away_value, *_ats_value, over/under_value)."""
+    if df is None or df.empty:
+        return 0
+    vcols = [c for c in df.columns if c.endswith("_value")]
+    if not vcols:
+        return 0
+    return int((df[vcols] == 1).any(axis=1).sum())
 
 
 # ── Embed builders ────────────────────────────────────────────────────────────
@@ -386,6 +497,8 @@ def _build_nba_embed(today: str) -> dict:
     blk_preds    = _load(NBA_DB,
                          "SELECT * FROM props_blk_predictions WHERE predict_date=? ORDER BY over_edge DESC",
                          params=(today,))
+    NBA_CFG = {"tip": "⏰ Tip (ET)", "spread_short": "Spread",
+               "spread_label": "📐 ATS Pick", "margin_unit": "pts", "total_unit": "pts"}
     best         = _get_best(preds, NBA_MIN_EDGE)
     ats_best     = _get_best_ats(spread_preds, NBA_MIN_EDGE)
     totals_best  = _get_best_total(totals_preds, NBA_MIN_EDGE)
@@ -395,8 +508,7 @@ def _build_nba_embed(today: str) -> dict:
     threes_best  = _get_best_threes_prop(threes_preds, 0.08)
     stl_best     = _get_best_stl_prop(stl_preds, 0.08)
     blk_best     = _get_best_blk_prop(blk_preds, 0.08)
-    val_count = int(((preds["home_value"] == 1) | (preds["away_value"] == 1)).sum()) \
-                if not preds.empty else 0
+    val_count = _count_value(preds) + _count_value(spread_preds) + _count_value(totals_preds)
     props_val = int(((props_preds["over_value"]==1)|(props_preds["under_value"]==1)).sum()) \
                 if not props_preds.empty else 0
     reb_val   = int(((reb_preds["over_value"]==1)|(reb_preds["under_value"]==1)).sum()) \
@@ -411,49 +523,10 @@ def _build_nba_embed(today: str) -> dict:
                  if not blk_preds.empty else 0
     game_count = len(preds)
 
-    if best:
-        tip = _fmt_tip(best["commence_time"])
-        try:
-            ladder = "Yes 🪜" if float(best["price"]) <= 250 else "No"
-        except Exception:
-            ladder = "—"
+    fields, picks = _team_market_fields(best, ats_best, totals_best, NBA_CFG)
+    any_prop = any([props_best, reb_best, ast_best, threes_best, stl_best, blk_best])
 
-        fields = [
-            {"name": "🎯 Pick",         "value": f"**{best['bet_team']}** `{_fmt_price(best['price'])}`", "inline": True},
-            {"name": "⏰ Tip (ET)",     "value": tip or "—",                              "inline": True},
-            {"name": "📚 Book",         "value": best["bookmaker"] or "—",                "inline": True},
-            {"name": "📈 Edge",         "value": f"**{best['edge']:+.1%}**",              "inline": True},
-            {"name": "🤖 Model Prob",   "value": f"{best['prob']:.1%}",                   "inline": True},
-            {"name": "📊 Book Implied", "value": f"{best['fair_prob']:.1%}",              "inline": True},
-            {"name": "💰 Kelly Stake",  "value": f"{best['kelly']*100:.1f}% of bankroll", "inline": True},
-            {"name": "🪜 Ladder",       "value": ladder,                                  "inline": True},
-            {"name": "🏟️ Matchup",     "value": f"{best['away_team']} @ {best['home_team']}", "inline": False},
-        ]
-        if ats_best:
-            spr = f"{ats_best['spread']:+.1f}" if ats_best["spread"] is not None else ""
-            fields.append({
-                "name": "📐 ATS Pick",
-                "value": (
-                    f"**{ats_best['bet_team']} {spr}** `{_fmt_price(ats_best['price'])}`  "
-                    f"P(cover): {ats_best['cover_prob']:.1%}  "
-                    f"Edge: **{ats_best['edge']:+.1%}**  "
-                    f"Pred margin: {ats_best['pred_home_margin']:+.1f} pts"
-                ),
-                "inline": False,
-            })
-        if totals_best:
-            side_label = "OVER" if totals_best["side"] == "over" else "UNDER"
-            line_str   = f"{totals_best['total_line']:.1f}" if totals_best["total_line"] is not None else "N/A"
-            fields.append({
-                "name": "🎯 Totals Pick",
-                "value": (
-                    f"**{side_label} {line_str}** `{_fmt_price(totals_best['price'])}`  "
-                    f"P(hit): {totals_best['ou_prob']:.1%}  "
-                    f"Edge: **{totals_best['edge']:+.1%}**  "
-                    f"Pred total: {totals_best['pred_total']:.1f} pts"
-                ),
-                "inline": False,
-            })
+    if picks or any_prop:
         if props_best:
             side_label = "OVER" if props_best["side"] == "over" else "UNDER"
             away = props_best["away_team"].split()[-1]
@@ -548,7 +621,7 @@ def _build_nba_embed(today: str) -> dict:
             "title":       "🏀 NBA — Best Bet of the Day",
             "color":       NBA_COLOR,
             "description": (
-                f"{game_count} games today · **{val_count} ML/ATS value bet{'s' if val_count != 1 else ''}**"
+                f"{game_count} games today · **{val_count} value play{'s' if val_count != 1 else ''}**"
                 + (f" · {props_val} pts prop{'s' if props_val != 1 else ''}" if props_val else "")
                 + (f" · {reb_val} reb prop{'s' if reb_val != 1 else ''}" if reb_val else "")
                 + (f" · {ast_val} ast prop{'s' if ast_val != 1 else ''}" if ast_val else "")
@@ -581,70 +654,30 @@ def _build_mlb_embed(today: str) -> dict:
     totals_preds = _load(MLB_DB,
                          "SELECT * FROM mlb_totals_predictions WHERE predict_date=? ORDER BY commence_time",
                          params=(today,))
+    MLB_CFG = {"tip": "⏰ Tip (ET)", "spread_short": "Run Line",
+               "spread_label": "📐 Run Line Pick", "margin_unit": "r", "total_unit": "r"}
     best         = _get_best(preds, MLB_MIN_EDGE)
     rl_best      = _get_best_ats(spread_preds, MLB_MIN_EDGE)
     totals_best  = _get_best_total(totals_preds, MLB_MIN_EDGE)
-    val_count = int(((preds["home_value"] == 1) | (preds["away_value"] == 1)).sum()) \
-                if not preds.empty else 0
+    val_count = _count_value(preds) + _count_value(spread_preds) + _count_value(totals_preds)
     game_count = len(preds)
 
-    if best:
-        tip = _fmt_tip(best["commence_time"])
-        try:
-            ladder = "Yes 🪜" if float(best["price"]) <= 250 else "No"
-        except Exception:
-            ladder = "—"
+    fields, picks = _team_market_fields(best, rl_best, totals_best, MLB_CFG)
 
-        fields = [
-            {"name": "🎯 Pick",         "value": f"**{best['bet_team']}** `{_fmt_price(best['price'])}`", "inline": True},
-            {"name": "⏰ Tip (ET)",     "value": tip or "—",                              "inline": True},
-            {"name": "📚 Book",         "value": best["bookmaker"] or "—",                "inline": True},
-            {"name": "📈 Edge",         "value": f"**{best['edge']:+.1%}**",              "inline": True},
-            {"name": "🤖 Model Prob",   "value": f"{best['prob']:.1%}",                   "inline": True},
-            {"name": "📊 Book Implied", "value": f"{best['fair_prob']:.1%}",              "inline": True},
-            {"name": "💰 Kelly Stake",  "value": f"{best['kelly']*100:.1f}% of bankroll", "inline": True},
-            {"name": "🪜 Ladder",       "value": ladder,                                  "inline": True},
-            {"name": "🏟️ Matchup",     "value": f"{best['away_team']} @ {best['home_team']}", "inline": False},
-        ]
-
-        # Pitcher matchup (MLB-specific)
-        hp = best.get("home_pitcher"); ap = best.get("away_pitcher")
-        he = best.get("home_era");     ae = best.get("away_era")
-        if hp and ap:
-            h_str = f"{hp} ({float(he):.2f} ERA)" if he else hp
-            a_str = f"{ap} ({float(ae):.2f} ERA)" if ae else ap
-            fields.append({"name": "⚾ Pitchers", "value": f"{a_str} vs {h_str}", "inline": False})
-
-        if rl_best:
-            spr = f"{rl_best['spread']:+.1f}" if rl_best["spread"] is not None else ""
-            fields.append({
-                "name": "📐 Run Line Pick",
-                "value": (
-                    f"**{rl_best['bet_team']} {spr}** `{_fmt_price(rl_best['price'])}`  "
-                    f"P(cover): {rl_best['cover_prob']:.1%}  "
-                    f"Edge: **{rl_best['edge']:+.1%}**  "
-                    f"Pred margin: {rl_best['pred_home_margin']:+.1f}r"
-                ),
-                "inline": False,
-            })
-        if totals_best:
-            side_label = "OVER" if totals_best["side"] == "over" else "UNDER"
-            line_str   = f"{totals_best['total_line']:.1f}" if totals_best["total_line"] is not None else "N/A"
-            fields.append({
-                "name": "🎯 Totals Pick",
-                "value": (
-                    f"**{side_label} {line_str}** `{_fmt_price(totals_best['price'])}`  "
-                    f"P(hit): {totals_best['ou_prob']:.1%}  "
-                    f"Edge: **{totals_best['edge']:+.1%}**  "
-                    f"Pred total: {totals_best['pred_total']:.1f}r"
-                ),
-                "inline": False,
-            })
+    if picks:
+        # Pitcher matchup (MLB-specific) — shown whenever the ML model produced a pick
+        if best:
+            hp = best.get("home_pitcher"); ap = best.get("away_pitcher")
+            he = best.get("home_era");     ae = best.get("away_era")
+            if hp and ap:
+                h_str = f"{hp} ({float(he):.2f} ERA)" if he else hp
+                a_str = f"{ap} ({float(ae):.2f} ERA)" if ae else ap
+                fields.append({"name": "⚾ Pitchers", "value": f"{a_str} vs {h_str}", "inline": False})
 
         return {
             "title":       "⚾ MLB — Best Bet of the Day",
             "color":       MLB_COLOR,
-            "description": f"{game_count} games today · **{val_count} value bet{'s' if val_count != 1 else ''} found**",
+            "description": f"{game_count} games today · **{val_count} value play{'s' if val_count != 1 else ''} found**",
             "fields":      fields,
             "footer":      {"text": f"AXIOM Edge · {today}"},
         }
@@ -654,6 +687,87 @@ def _build_mlb_embed(today: str) -> dict:
                f"{game_count} games analysed — no strong edge found today. Skip MLB.")
         return {
             "title":       "⚾ MLB — No Bet Today",
+            "color":       SKIP_COLOR,
+            "description": msg,
+            "footer":      {"text": f"AXIOM Edge · {today}"},
+        }
+
+
+# ── NHL ───────────────────────────────────────────────────────────────────────
+
+def _get_best_nhl_spread(spread_preds: pd.DataFrame, min_edge: float):
+    """Best puck-line bet. NHL spread tables use plain column names (home_edge,
+    model_home_cover_prob, home_kelly, home_value) rather than the _ats_ prefix
+    that the NBA/MLB tables use, so this can't reuse _get_best_ats."""
+    if spread_preds.empty:
+        return None
+    candidates = []
+    for _, g in spread_preds.iterrows():
+        for side in ["home", "away"]:
+            if not g.get(f"{side}_value"):
+                continue
+            edge  = float(g.get(f"{side}_edge", 0))
+            prob  = float(g.get(f"model_{side}_cover_prob", 0))
+            kelly = float(g.get(f"{side}_kelly", 0))
+            price = g.get(f"{side}_price")
+            if edge < min_edge or kelly < 0.005:
+                continue
+            candidates.append({
+                "side":          side,
+                "bet_team":      g["home_team"] if side == "home" else g["away_team"],
+                "home_team":     g["home_team"],
+                "away_team":     g["away_team"],
+                "spread":        g.get(f"{side}_point"),
+                "cover_prob":    prob,
+                "edge":          edge,
+                "kelly":         kelly,
+                "price":         price,
+                "commence_time": g.get("commence_time", ""),
+                "bookmaker":     str(g.get("bookmaker", "")).upper(),
+            })
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda x: x["edge"], reverse=True)[0]
+
+
+def _build_nhl_embed(today: str) -> dict:
+    preds = _load(NHL_DB,
+                  "SELECT * FROM nhl_predictions WHERE predict_date=? ORDER BY commence_time",
+                  params=(today,))
+    spread_preds = _load(NHL_DB,
+                         "SELECT * FROM nhl_spread_predictions WHERE predict_date=? ORDER BY commence_time",
+                         params=(today,))
+    totals_preds = _load(NHL_DB,
+                         "SELECT * FROM nhl_totals_predictions WHERE predict_date=? ORDER BY commence_time",
+                         params=(today,))
+    # NHL totals store the book number as book_line; _get_best_total reads total_line.
+    if not totals_preds.empty:
+        totals_preds = totals_preds.rename(columns={"book_line": "total_line"})
+
+    NHL_CFG = {"tip": "⏰ Puck (ET)", "spread_short": "Puck Line",
+               "spread_label": "📐 Puck Line Pick", "margin_unit": None, "total_unit": "goals"}
+    best        = _get_best(preds, NHL_MIN_EDGE)            # ML cols already match
+    pl_best     = _get_best_nhl_spread(spread_preds, NHL_MIN_EDGE)
+    totals_best = _get_best_total(totals_preds, NHL_MIN_EDGE)
+    val_count = _count_value(preds) + _count_value(spread_preds) + _count_value(totals_preds)
+    game_count = len(preds)
+
+    fields, picks = _team_market_fields(best, pl_best, totals_best, NHL_CFG)
+
+    if picks:
+        return {
+            "title":       "🏒 NHL — Best Bet of the Day",
+            "color":       NHL_COLOR,
+            "description": f"{game_count} games today · **{val_count} value play{'s' if val_count != 1 else ''} found**",
+            "fields":      fields,
+            "footer":      {"text": f"AXIOM Edge · {today}"},
+        }
+    else:
+        msg = ("No NHL predictions yet — run `python nhl_odds.py && python nhl_predict.py`."
+               if preds.empty else
+               f"{game_count} games analysed — no strong edge found today. Skip NHL.")
+        return {
+            "title":       "🏒 NHL — No Bet Today",
             "color":       SKIP_COLOR,
             "description": msg,
             "footer":      {"text": f"AXIOM Edge · {today}"},
@@ -677,14 +791,20 @@ def send_alert() -> bool:
     payload = {
         "username":   "AXIOM Edge",
         "content":    f"**⚡ AXIOM Edge  ·  Daily Picks  ·  {date_nice}**",
-        "embeds":     [_build_nba_embed(today), _build_mlb_embed(today)],
+        "embeds":     [_build_nba_embed(today), _build_mlb_embed(today),
+                       _build_nhl_embed(today)],
     }
 
     data = json.dumps(payload).encode("utf-8")
     req  = urllib.request.Request(
         webhook_url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        # A real User-Agent is required: Cloudflare blocks urllib's default
+        # "Python-urllib/x.y" UA with HTTP 403 / error 1010 before it reaches Discord.
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent":   "AXIOM-Edge/1.0 (+https://github.com/Dconnors21/axiom_edge)",
+        },
         method="POST",
     )
     try:
