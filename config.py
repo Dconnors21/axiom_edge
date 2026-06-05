@@ -1,10 +1,10 @@
 # ── config.py ─────────────────────────────────────────────────────────────────
 # Central config for the NBA value bets model.
-# Replace YOUR_ODDS_API_KEY_HERE with your actual key from the-odds-api.com
+# Set ODDS_API_KEY in your .env file (get a key from the-odds-api.com).
 
 # ── API Keys ──────────────────────────────────────────────────────────────────
-import os
-ODDS_API_KEY = os.getenv("ODDS_API_KEY", "590ce3633c52e978993d60e6c1507b46")
+from env_loader import require
+ODDS_API_KEY = require("ODDS_API_KEY")
 
 # ── Database ──────────────────────────────────────────────────────────────────
 DB_PATH = "nba.db"

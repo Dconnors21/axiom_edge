@@ -3,12 +3,13 @@
 # Keep this separate from config.py / mlb_config.py.
 
 import os
+from env_loader import require
 
 # ── Database ──────────────────────────────────────────────────────────────────
 NHL_DB_PATH = os.path.join(os.path.dirname(__file__), "nhl.db")
 
 # ── Odds API ──────────────────────────────────────────────────────────────────
-ODDS_API_KEY  = os.getenv("ODDS_API_KEY", "590ce3633c52e978993d60e6c1507b46")
+ODDS_API_KEY  = require("ODDS_API_KEY")
 NHL_SPORT     = "icehockey_nhl"
 SHARP_BOOKS   = ["pinnacle", "draftkings", "fanduel", "betmgm", "caesars"]
 
