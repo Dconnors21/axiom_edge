@@ -56,7 +56,7 @@ def init_tables(conn):
     """)
     conn.commit()
 
-def fetch_odds(conn) -> pd.DataFrame:
+def fetch_odds(conn) -> list:
     url = f"https://api.the-odds-api.com/v4/sports/{NHL_SPORT}/odds"
     params = {
         "apiKey":     ODDS_API_KEY,
@@ -69,7 +69,7 @@ def fetch_odds(conn) -> pd.DataFrame:
         resp = requests.get(url, params=params, timeout=10)
         if resp.status_code != 200:
             print(f"  Odds API returned {resp.status_code}: {resp.text[:200]}")
-            return pd.DataFrame()
+            return []
         data = resp.json()
         print(f"  Fetched {len(data)} NHL games from Odds API")
         return data

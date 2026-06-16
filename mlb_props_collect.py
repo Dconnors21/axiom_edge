@@ -99,7 +99,8 @@ def pull_pitcher_logs(player_id, player_name, season, team, conn, existing):
     url  = f"{MLB_API}/people/{player_id}/stats"
     data = _get(url, params={"stats": "gameLog", "season": season,
                               "group": "pitching", "gameType": "R"})
-    splits = data.get("stats", [{}])[0].get("splits", [])
+    stats  = (data or {}).get("stats", [])
+    splits = stats[0].get("splits", []) if stats else []
     saved  = 0
 
     for sp in splits:
@@ -140,7 +141,8 @@ def pull_batter_logs(player_id, player_name, season, team, conn, existing):
     url  = f"{MLB_API}/people/{player_id}/stats"
     data = _get(url, params={"stats": "gameLog", "season": season,
                               "group": "hitting", "gameType": "R"})
-    splits = data.get("stats", [{}])[0].get("splits", [])
+    stats  = (data or {}).get("stats", [])
+    splits = stats[0].get("splits", []) if stats else []
     saved  = 0
 
     for sp in splits:

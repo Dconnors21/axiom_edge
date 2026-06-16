@@ -88,8 +88,8 @@ def pull_team_season_stats(season: str, conn: sqlite3.Connection):
     try:
         stats = leaguedashteamstats.LeagueDashTeamStats(
             season=season,
-            measure_type_nullable="Advanced",
-            per_mode_simple="PerGame",
+            measure_type_detailed_defense="Advanced",
+            per_mode_detailed="PerGame",
         )
         df = stats.get_data_frames()[0]
     except Exception as e:
