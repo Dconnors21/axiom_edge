@@ -13,7 +13,7 @@
     "opp_k_pct_last10",
     "season_k_avg"
   ],
-  "sigma": 2.1365673972557153,
+  "sigma": 2.179425818975197,
   "market": "pitcher_strikeouts",
-  "trained_at": "2026-06-02T09:32:41.925312"
+  "trained_at": "2026-06-22T11:56:08.391729"
 }

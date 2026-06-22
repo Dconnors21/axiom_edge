@@ -11,7 +11,7 @@
     "season_tb_avg",
     "opp_era_last5"
   ],
-  "sigma": 1.7153105239494888,
+  "sigma": 1.7302027494159586,
   "market": "batter_total_bases",
-  "trained_at": "2026-06-02T09:46:05.117503"
+  "trained_at": "2026-06-22T12:19:07.326695"
 }
