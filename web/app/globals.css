@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   AXIOM Edge — design tokens (locked). Single dark theme, no section inverts.
+   Source of truth: DESIGN.md. Do not add a second theme or a light variant.
+   ───────────────────────────────────────────────────────────────────────────── */
+:root {
+  /* Surfaces — cool near-black, never #000 */
+  --bg:               #0A0B0D;
+  --surface:          #101113;
+  --surface-elevated: #16181B;
+  --surface-overlay:  #1C1F23;
+  --border:           rgba(255, 255, 255, 0.08);
+  --border-strong:    rgba(255, 255, 255, 0.14);
+
+  /* Text — off-white, never #fff */
+  --text-primary:   #F4F5F6;
+  --text-secondary: #A1A4AB;
+  --text-tertiary:  #6B6F76;
+
+  /* Accent — ONE signal color = AXIOM's edge. Signal gold, solid, no gradients. */
+  --accent:       #E9B24A;
+  --accent-hover: #F2BD5C;
+
+  /* Semantics — reserved, never reused as the brand accent */
+  --pos: #34D399;
+  --neg: #F2615C;
+
+  /* Radius — one scale: inputs/buttons 8px · cards 12px · pills full */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+
+  /* Motion — Emil's curves (the built-in CSS easings are too weak) */
+  --ease-out:    cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-micro: 140ms;
+  --dur-sm:    200ms;
+  --dur-md:    260ms;
+}
+
+/* Map tokens to Tailwind v4 utilities (bg-bg, text-secondary, border-subtle, …) */
+@theme inline {
+  --color-bg:               var(--bg);
+  --color-surface:          var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-overlay:  var(--surface-overlay);
+  --color-border-subtle:    var(--border);
+  --color-border-strong:    var(--border-strong);
+
+  --color-text-primary:   var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary:  var(--text-tertiary);
+
+  --color-accent:       var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-pos:          var(--pos);
+  --color-neg:          var(--neg);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* ── Base ── */
+html {
+  background: var(--bg);
+  color: var(--text-primary);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numerics rule (non-negotiable): every number is mono + tabular.
+   Apply `.tnum` to any odd, probability, EV, AUC, dollar, or percent. */
+.tnum {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* ── Focus: visible, accent, never removed ── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ── Scrollbars: quiet, on-surface ── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 3px solid var(--bg);
+}
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* ── Touch hygiene (carries into PWA / mobile) ── */
+* { -webkit-tap-highlight-color: transparent; }
+
+/* ── Reduced motion: kill non-essential animation, keep comprehension ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
