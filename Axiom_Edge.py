@@ -25,8 +25,31 @@ st.markdown("""
 [data-testid="stToolbar"] { display: none }
 header { background: transparent !important }
 header svg, header a, header button:not([data-testid="baseButton-headerNoPadding"]) { display: none !important }
-[data-testid="collapsedControl"] { display: flex !important; visibility: visible !important; opacity: 1 !important; z-index: 999999 !important }
-[data-testid="collapsedControl"] button { display: flex !important; visibility: visible !important }
+/* Reopen-sidebar control. In Streamlit 1.57 this is stExpandSidebarButton,
+   which lives in the header — so the `header button { display:none }` rule
+   above was hiding it. Force it visible (cover older testids too). */
+[data-testid="stExpandSidebarButton"],
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"] {
+    display: flex !important; visibility: visible !important; opacity: 1 !important;
+    z-index: 999999 !important;
+}
+[data-testid="stExpandSidebarButton"] button,
+[data-testid="stExpandSidebarButton"],
+[data-testid="collapsedControl"] button,
+[data-testid="stSidebarCollapsedControl"] button {
+    display: flex !important; visibility: visible !important; opacity: 1 !important;
+    width: 2.4rem !important; height: 2.4rem !important; padding: 0 !important;
+    align-items: center !important; justify-content: center !important;
+    background: #131d2e !important; border: 1px solid #1e2d42 !important; border-radius: 8px !important;
+}
+/* Force the arrow icon (svg or material-symbol span) to show + visible color. */
+[data-testid="stExpandSidebarButton"] svg, [data-testid="stExpandSidebarButton"] span,
+[data-testid="collapsedControl"] svg, [data-testid="collapsedControl"] span,
+[data-testid="stSidebarCollapsedControl"] svg, [data-testid="stSidebarCollapsedControl"] span {
+    display: inline-flex !important; visibility: visible !important;
+    color: #60a5fa !important; fill: #60a5fa !important;
+}
 .block-container { padding-top: 0; padding-bottom: 3rem; max-width: 1600px; padding-left: 2rem; padding-right: 2rem }
 html, body, [class*="css"] { font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; color: #f0f2f5 }
 
