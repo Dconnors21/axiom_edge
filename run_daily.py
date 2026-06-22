@@ -94,6 +94,27 @@ def _mark_ran_today(pipeline: str):
     stamp.write_text(datetime.now().isoformat())
 
 
+# League seasons as (month, day) windows, inclusive. NBA/NHL wrap the new year
+# (Oct -> mid-Jun, covering playoffs); MLB runs Mar -> early Nov (covering the WS).
+# Used to skip the dead offseason so we don't burn data pulls / Odds API credits
+# fetching slates that don't exist. Generous on the playoff end to avoid cutting
+# off Finals/Cup/WS games.
+_SEASON = {
+    "nba": ((10, 1), (6, 20)),
+    "nhl": ((10, 1), (6, 20)),
+    "mlb": ((3, 15), (11, 5)),
+}
+
+
+def _in_season(league: str, today: date = None) -> bool:
+    today = today or date.today()
+    (sm, sd), (em, ed) = _SEASON[league]
+    cur, start, end = (today.month, today.day), (sm, sd), (em, ed)
+    if start <= end:           # within one calendar year (MLB)
+        return start <= cur <= end
+    return cur >= start or cur <= end   # wraps year-end (NBA/NHL)
+
+
 # ── Pipelines ─────────────────────────────────────────────────────────────────
 
 def morning_pipeline():
@@ -108,18 +129,22 @@ def morning_pipeline():
     # ── NBA ──────────────────────────────────────────────────────────────────
     log("─── NBA ───────────────────────────────────────────────────")
 
-    run("collect.py",       "NBA: data collection")
-    run("collect_props.py", "NBA: player game logs")
-    run("features.py",      "NBA: feature engineering")
+    if _in_season("nba"):
+        run("collect.py",       "NBA: data collection")
+        run("collect_props.py", "NBA: player game logs")
+        run("features.py",      "NBA: feature engineering")
 
-    if _should_retrain("model.pkl"):
-        log("Retraining NBA model (weekly schedule or missing)...")
-        run("train.py", "NBA: model training")
+        if _should_retrain("model.pkl"):
+            log("Retraining NBA model (weekly schedule or missing)...")
+            run("train.py", "NBA: model training")
+        else:
+            age = (time.time() - Path("model.pkl").stat().st_mtime) / 86400
+            log(f"Skipping NBA retrain — model is {age:.1f} days old")
+
+        odds_ok = run("odds.py", "NBA: odds fetching")
     else:
-        age = (time.time() - Path("model.pkl").stat().st_mtime) / 86400
-        log(f"Skipping NBA retrain — model is {age:.1f} days old")
-
-    odds_ok = run("odds.py", "NBA: odds fetching")
+        log("NBA out of season — skipping data pull and picks")
+        odds_ok = False
     if odds_ok:
         _clear_stale_predictions("nba.db", "predictions", today)
         _clear_stale_predictions("nba.db", "spread_predictions", today)
@@ -180,18 +205,22 @@ def morning_pipeline():
     # ── MLB ──────────────────────────────────────────────────────────────────
     log("─── MLB ───────────────────────────────────────────────────")
 
-    run("mlb_collect.py",   "MLB: data collection")
-    run("mlb_features.py",  "MLB: feature engineering")
+    if _in_season("mlb"):
+        run("mlb_collect.py",   "MLB: data collection")
+        run("mlb_features.py",  "MLB: feature engineering")
 
-    if _should_retrain("mlb_model.pkl"):
-        log("Retraining MLB model (weekly schedule or missing)...")
-        run("mlb_train.py", "MLB: model training")
+        if _should_retrain("mlb_model.pkl"):
+            log("Retraining MLB model (weekly schedule or missing)...")
+            run("mlb_train.py", "MLB: model training")
+        else:
+            age = (time.time() - Path("mlb_model.pkl").stat().st_mtime) / 86400
+            log(f"Skipping MLB retrain — model is {age:.1f} days old")
+
+        mlb_odds_ok = run("mlb_pitchers.py", "MLB: pitcher data")
+        mlb_odds_ok = run("mlb_odds.py",     "MLB: odds fetching") and mlb_odds_ok
     else:
-        age = (time.time() - Path("mlb_model.pkl").stat().st_mtime) / 86400
-        log(f"Skipping MLB retrain — model is {age:.1f} days old")
-
-    mlb_odds_ok = run("mlb_pitchers.py", "MLB: pitcher data")
-    mlb_odds_ok = run("mlb_odds.py",     "MLB: odds fetching") and mlb_odds_ok
+        log("MLB out of season — skipping data pull and picks")
+        mlb_odds_ok = False
     if mlb_odds_ok:
         _clear_stale_predictions("mlb.db", "mlb_predictions", today)
         _clear_stale_predictions("mlb.db", "mlb_spread_predictions", today)
@@ -205,16 +234,22 @@ def morning_pipeline():
     # ── MLB Player Props ──────────────────────────────────────────────────────
     log("─── MLB Player Props ──────────────────────────────────────")
 
-    run("mlb_props_collect.py", "MLB Props: collecting player game logs")
+    if _in_season("mlb"):
+        run("mlb_props_collect.py",      "MLB Props: collecting player game logs")
+        # Fill opponent on freshly pulled logs (date + team -> mlb_games). Idempotent.
+        run("mlb_backfill_opponents.py", "MLB Props: backfilling opponents")
 
-    if _should_retrain("mlb_k_model.pkl"):
-        log("Retraining MLB props models (weekly schedule or missing)...")
-        run("mlb_props_train.py", "MLB Props: model training (K's, hits, TB)")
+        if _should_retrain("mlb_k_model.pkl"):
+            log("Retraining MLB props models (weekly schedule or missing)...")
+            run("mlb_props_train.py", "MLB Props: model training (K's, hits, TB)")
+        else:
+            age = (time.time() - Path("mlb_k_model.pkl").stat().st_mtime) / 86400
+            log(f"Skipping MLB props retrain — models are {age:.1f} days old")
+
+        mlb_props_odds_ok = run("mlb_props_odds.py", "MLB Props: fetching prop odds (K's, hits, TB)")
     else:
-        age = (time.time() - Path("mlb_k_model.pkl").stat().st_mtime) / 86400
-        log(f"Skipping MLB props retrain — models are {age:.1f} days old")
-
-    mlb_props_odds_ok = run("mlb_props_odds.py", "MLB Props: fetching prop odds (K's, hits, TB)")
+        log("MLB out of season — skipping player props")
+        mlb_props_odds_ok = False
     if mlb_props_odds_ok:
         _clear_stale_predictions("mlb.db", "mlb_props_predictions_k",    today)
         _clear_stale_predictions("mlb.db", "mlb_props_predictions_hits", today)
@@ -226,19 +261,23 @@ def morning_pipeline():
     # ── NHL ──────────────────────────────────────────────────────────────────
     log("─── NHL ───────────────────────────────────────────────────")
 
-    run("nhl_collect.py",  "NHL: data collection")
-    run("nhl_features.py", "NHL: feature engineering")
+    if _in_season("nhl"):
+        run("nhl_collect.py",  "NHL: data collection")
+        run("nhl_features.py", "NHL: feature engineering")
 
-    if _should_retrain("nhl_model.pkl"):
-        log("Retraining NHL moneyline model (weekly schedule or missing)...")
-        run("nhl_train.py",          "NHL: moneyline model training")
-        run("nhl_train_spread.py",   "NHL: puck line model training")
-        run("nhl_train_totals.py",   "NHL: totals model training")
+        if _should_retrain("nhl_model.pkl"):
+            log("Retraining NHL moneyline model (weekly schedule or missing)...")
+            run("nhl_train.py",          "NHL: moneyline model training")
+            run("nhl_train_spread.py",   "NHL: puck line model training")
+            run("nhl_train_totals.py",   "NHL: totals model training")
+        else:
+            age = (time.time() - Path("nhl_model.pkl").stat().st_mtime) / 86400
+            log(f"Skipping NHL retrain — model is {age:.1f} days old")
+
+        nhl_odds_ok = run("nhl_odds.py", "NHL: odds fetching")
     else:
-        age = (time.time() - Path("nhl_model.pkl").stat().st_mtime) / 86400
-        log(f"Skipping NHL retrain — model is {age:.1f} days old")
-
-    nhl_odds_ok = run("nhl_odds.py", "NHL: odds fetching")
+        log("NHL out of season — skipping data pull and picks")
+        nhl_odds_ok = False
     if nhl_odds_ok:
         _clear_stale_predictions("nhl.db", "nhl_predictions",        today)
         _clear_stale_predictions("nhl.db", "nhl_spread_predictions",  today)
