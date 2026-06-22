@@ -28,3 +28,9 @@ Thumbs.db
 
 # Test artifacts
 *.bat
+
+# Locally installed AI skill tooling (reinstall via `npx skills` / `npx impeccable`)
+.agents/
+.claude/
+.codex/
+skills-lock.json
