@@ -2,7 +2,10 @@ import type { Metadata, Viewport } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import Sidebar from "@/components/Sidebar";
+import BottomNav from "@/components/BottomNav";
 import ServiceWorkerManager from "@/components/ServiceWorkerManager";
+import InstallPrompt from "@/components/InstallPrompt";
+import PullToRefresh from "@/components/PullToRefresh";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -39,9 +42,16 @@ export default function RootLayout({
     >
       <body className="min-h-full bg-bg text-text-primary">
         <div className="flex h-dvh">
-          <Sidebar />
-          <main className="flex-1 overflow-y-auto">{children}</main>
+          <div className="hidden md:block">
+            <Sidebar />
+          </div>
+          <main className="flex-1 overflow-y-auto pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0">
+            {children}
+          </main>
         </div>
+        <BottomNav />
+        <PullToRefresh />
+        <InstallPrompt />
         <ServiceWorkerManager />
       </body>
     </html>
