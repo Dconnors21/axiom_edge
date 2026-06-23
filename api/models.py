@@ -213,6 +213,28 @@ class Ladder(BaseModel):
     survival_10: Optional[float] = None
 
 
+class PushPrefs(BaseModel):
+    threshold: Optional[float] = None
+    leagues: Optional[str] = None          # csv "nba,mlb,nhl"
+    quiet_start: Optional[int] = None
+    quiet_end: Optional[int] = None
+    daily_cap: Optional[int] = None
+
+
+class SubscribeRequest(BaseModel):
+    subscription: dict                     # browser PushSubscription.toJSON()
+    prefs: Optional[PushPrefs] = None
+
+
+class EndpointRequest(BaseModel):
+    endpoint: str
+
+
+class SettingsRequest(BaseModel):
+    endpoint: str
+    prefs: PushPrefs
+
+
 class EVRequest(BaseModel):
     prob: float
     american_price: int

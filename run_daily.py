@@ -296,6 +296,9 @@ def morning_pipeline():
     except Exception as e:
         log(f"  Discord alert error: {e}")
 
+    # ── Web-push edge alert (eligible subscribers only) ────────────────────────
+    run("push_notify.py", "Push: edge alerts")
+
     _mark_ran_today("morning")
     log("=" * 60)
     log("Morning pipeline complete — check dashboard: streamlit run Axiom_Edge.py")

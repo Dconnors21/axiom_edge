@@ -1,6 +1,7 @@
 """AXIOM Edge serving layer (FastAPI). Read-only JSON over the prediction DBs."""
 from __future__ import annotations
 
+import os
 import sqlite3
 from datetime import datetime, timezone
 
@@ -11,10 +12,12 @@ from .db import LEAGUES, connect, latest_slate_date, fetch_slate
 from .ev import american_to_decimal, american_to_implied, ev_per_unit, kelly_fraction
 from . import metrics
 from .ladder import build_ladder
+from . import push as pushmod
 from .models import (
     Side, Game, Slate, Insight, Performance, CalibrationBucket, RocPoint,
     Roi, BetRow, EquityPoint, PropRow, PropsSlate, ResearchPlayer, Research,
     ResearchGame, ResearchDetail, Ladder, EVRequest, EVResponse,
+    PushPrefs, SubscribeRequest, EndpointRequest, SettingsRequest,
 )
 
 app = FastAPI(title="AXIOM Edge API", version="0.1.0")
@@ -492,6 +495,40 @@ def research_player(league: str, name: str, window: int = 10) -> ResearchDetail:
 @app.get("/api/ladder", response_model=Ladder)
 def ladder(stake: float = 50.0, days: int = 10) -> Ladder:
     return build_ladder(stake=stake, target_days=days)
+
+
+@app.get("/api/push/vapid")
+def push_vapid() -> dict:
+    return {"public_key": os.getenv("VAPID_PUBLIC_KEY", "")}
+
+
+@app.post("/api/push/subscribe")
+def push_subscribe(req: SubscribeRequest) -> dict:
+    pushmod.init_db()
+    prefs = req.prefs.model_dump(exclude_none=True) if req.prefs else None
+    pushmod.upsert(req.subscription, prefs)
+    return {"ok": True}
+
+
+@app.post("/api/push/unsubscribe")
+def push_unsubscribe(req: EndpointRequest) -> dict:
+    pushmod.delete(req.endpoint)
+    return {"ok": True}
+
+
+@app.post("/api/push/settings")
+def push_settings(req: SettingsRequest) -> dict:
+    return {"ok": pushmod.update_prefs(req.endpoint, req.prefs.model_dump(exclude_none=True))}
+
+
+@app.post("/api/push/test")
+def push_test(req: EndpointRequest) -> dict:
+    ok = pushmod.send_to_one(req.endpoint, {
+        "title": "AXIOM Edge",
+        "body": "Alerts are on. We'll ping you when the model flags an edge.",
+        "url": "/",
+    })
+    return {"ok": ok}
 
 
 @app.post("/api/ev", response_model=EVResponse)

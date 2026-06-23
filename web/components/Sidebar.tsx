@@ -9,6 +9,7 @@ import {
   Basketball,
   Baseball,
   Hockey,
+  Gear,
 } from "@phosphor-icons/react";
 
 type NavItem = { label: string; href: string };
@@ -21,6 +22,7 @@ const GROUPS: NavGroup[] = [
       { label: "Overview", href: "/" },
       { label: "Bankroll", href: "/bankroll" },
       { label: "Model Performance", href: "/performance" },
+      { label: "Settings", href: "/settings" },
     ],
   },
   {
@@ -57,6 +59,7 @@ const TOP_ICONS: Record<string, React.ReactNode> = {
   "/": <House weight="fill" />,
   "/bankroll": <Wallet weight="fill" />,
   "/performance": <ChartLineUp weight="fill" />,
+  "/settings": <Gear weight="fill" />,
 };
 
 export default function Sidebar() {
