@@ -18,6 +18,20 @@ _CURRENT_SEASON = str(date.today().year)
 PROPS_MIN_EDGE = 0.08   # 8% edge required for props (higher than game-level)
 PROPS_BOOKS    = ["draftkings", "fanduel"]
 
+# Value policy from a 4-week realized backtest (2026-05-27 .. 06-22):
+#   - Strikeout UNDERS in a moderate edge band won (+15% ROI, 61% hit); overs
+#     lost (-22%) and the model's 20%+ "edges" were overconfident (-5.5%).
+#   - Batter hits / total-bases value flags were net-negative (~-7% ROI), so
+#     they're suppressed until they demonstrate an edge.
+# Predictions are still stored for every market (calibration / research); this
+# only governs what gets flagged as an actionable value bet.
+_VALUE_POLICY = {
+    "pitcher_strikeouts": {"over": False, "under": True,  "edge_min": 0.08, "edge_max": 0.20},
+    "batter_hits":        {"over": False, "under": False, "edge_min": 0.08, "edge_max": 1.00},
+    "batter_total_bases": {"over": False, "under": False, "edge_min": 0.08, "edge_max": 1.00},
+}
+_DEFAULT_POLICY = {"over": True, "under": True, "edge_min": PROPS_MIN_EDGE, "edge_max": 1.00}
+
 _MARKET_CONFIGS = [
     {
         "market":     "pitcher_strikeouts",
@@ -384,8 +398,9 @@ def run_market(cfg: dict, conn, today: str, opp_k_rates: dict = None, opp_era: d
         up = float(row["under_price"])
         k_over  = kelly(edge_over,  prob_over,  op)
         k_under = kelly(edge_under, prob_under, up)
-        val_over  = 1 if edge_over  >= PROPS_MIN_EDGE else 0
-        val_under = 1 if edge_under >= PROPS_MIN_EDGE else 0
+        pol = _VALUE_POLICY.get(market, _DEFAULT_POLICY)
+        val_over  = 1 if pol["over"]  and pol["edge_min"] <= edge_over  <= pol["edge_max"] else 0
+        val_under = 1 if pol["under"] and pol["edge_min"] <= edge_under <= pol["edge_max"] else 0
 
         if val_over or val_under:
             value_ct += 1

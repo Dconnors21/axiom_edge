@@ -387,6 +387,9 @@ def evening_pipeline():
                 )
         else:
             log("No unresolved MLB prop predictions found (last 14 days)")
+        # Reliable local backfill of actual_val from the game logs, so the props
+        # models stay self-validating regardless of the API fetcher above.
+        run("mlb_props_grade.py", "MLB props: grading from game logs")
     except Exception as e:
         log(f"MLB props results check failed: {e}")
 
