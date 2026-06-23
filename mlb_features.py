@@ -159,17 +159,20 @@ def add_park_factors(df):
     return df
 
 def add_pitcher_features(df, conn):
-    """Real starting-pitcher ERA/WHIP per game, point-in-time (no leakage).
+    """Real starting-pitcher + bullpen features per game, point-in-time (no leakage).
 
-    The actual starter for each team-game is the pitcher with the most innings in
-    mlb_pitcher_game_logs (real MLB Stats API data). Their rate stats are the
-    season-to-date totals *entering* that game, shrunk toward league average so a
-    pitcher with one great start doesn't read as a 0.00 ERA ace. This matches what
-    the serve-time path feeds the model (the probable starter's real season ERA),
-    fixing the old train/serve mismatch where training used team-average ERA.
+    From mlb_pitcher_game_logs (real MLB Stats API per-game data):
+      - the starter is the pitcher with the most innings that team-game;
+      - sp_era/whip_season = the starter's season-to-date rate entering the game;
+      - sp_era_last3       = the starter's last-3-starts ERA (recent form);
+      - bullpen_era_last7  = the team's relief ERA over its last 7 games.
+    All rates are shrunk toward league average so small samples don't read as
+    aces, and all use only games strictly before the current one. This matches
+    what the serve-time path feeds the model.
     """
-    print("  Adding pitcher features (real starters, point-in-time)...")
-    LEAGUE_ERA, LEAGUE_WHIP, REG_IP = 4.20, 1.30, 20.0
+    print("  Adding pitcher features (real starters + bullpen, point-in-time)...")
+    LEAGUE_ERA, LEAGUE_WHIP = 4.20, 1.30
+    REG_SEASON, REG_LAST3, REG_BULLPEN = 20.0, 12.0, 15.0
     try:
         logs = pd.read_sql("""
             SELECT player_name, team, game_date, season,
@@ -185,37 +188,60 @@ def add_pitcher_features(df, conn):
         logs["season"] = logs["season"].astype(str)
         logs = logs.sort_values(["player_name", "season", "game_date"])
 
-        # Prior (exclusive) cumulative totals entering each appearance, per season.
+        # --- per-pitcher: season-to-date + last-3-starts, entering each game ---
         g = logs.groupby(["player_name", "season"], sort=False)
         p_ip = g["innings_pitched"].cumsum() - logs["innings_pitched"]
         p_er = g["earned_runs"].cumsum() - logs["earned_runs"]
         p_h = g["hits_allowed"].cumsum() - logs["hits_allowed"]
         p_bb = g["walks"].cumsum() - logs["walks"]
-        # Shrink toward league average (REG_IP innings of prior).
-        logs["sd_era"] = (9 * p_er + LEAGUE_ERA * REG_IP) / (p_ip + REG_IP)
-        logs["sd_whip"] = (p_h + p_bb + LEAGUE_WHIP * REG_IP) / (p_ip + REG_IP)
+        logs["sd_era"] = (9 * p_er + LEAGUE_ERA * REG_SEASON) / (p_ip + REG_SEASON)
+        logs["sd_whip"] = (p_h + p_bb + LEAGUE_WHIP * REG_SEASON) / (p_ip + REG_SEASON)
+        l3_er = g["earned_runs"].transform(lambda s: s.shift(1).rolling(3, min_periods=1).sum()).fillna(0.0)
+        l3_ip = g["innings_pitched"].transform(lambda s: s.shift(1).rolling(3, min_periods=1).sum()).fillna(0.0)
+        logs["last3_era"] = (9 * l3_er + LEAGUE_ERA * REG_LAST3) / (l3_ip + REG_LAST3)
 
-        # Starter = max innings for that team on that date.
+        # --- starter per team-game (max innings) ---
         starters = logs.sort_values("innings_pitched", ascending=False).drop_duplicates(
             ["game_date", "team"]
         )
-        smap = starters.set_index(["game_date", "team"])[["sd_era", "sd_whip"]].to_dict("index")
+        smap = starters.set_index(["game_date", "team"])[["sd_era", "sd_whip", "last3_era"]].to_dict("index")
 
-        def look(date, team, key, default):
-            # df game_date may be a Timestamp ("2023-04-06 00:00:00"); the map keys
-            # are plain "YYYY-MM-DD", so normalize to the first 10 chars.
+        # --- team bullpen ERA over last 7 games (relievers = team total minus starter) ---
+        tg = logs.groupby(["game_date", "team", "season"], as_index=False).agg(
+            team_er=("earned_runs", "sum"), team_ip=("innings_pitched", "sum"))
+        st = starters[["game_date", "team", "earned_runs", "innings_pitched"]].rename(
+            columns={"earned_runs": "st_er", "innings_pitched": "st_ip"})
+        tg = tg.merge(st, on=["game_date", "team"], how="left")
+        tg["bp_er"] = (tg["team_er"] - tg["st_er"]).clip(lower=0)
+        tg["bp_ip"] = (tg["team_ip"] - tg["st_ip"]).clip(lower=0)
+        tg = tg.sort_values(["team", "season", "game_date"])
+        tgg = tg.groupby(["team", "season"], sort=False)
+        b7_er = tgg["bp_er"].transform(lambda s: s.shift(1).rolling(7, min_periods=1).sum()).fillna(0.0)
+        b7_ip = tgg["bp_ip"].transform(lambda s: s.shift(1).rolling(7, min_periods=1).sum()).fillna(0.0)
+        tg["bullpen_era_last7"] = (9 * b7_er + LEAGUE_ERA * REG_BULLPEN) / (b7_ip + REG_BULLPEN)
+        bpmap = tg.set_index(["game_date", "team"])["bullpen_era_last7"].to_dict()
+
+        # df game_date may be a Timestamp; map keys are "YYYY-MM-DD".
+        def sp(date, team, key, default):
             return smap.get((str(date)[:10], str(team)), {}).get(key, default)
 
-        df["home_sp_era_season"]  = df.apply(lambda r: look(r["game_date"], r["home_team"], "sd_era", LEAGUE_ERA), axis=1)
-        df["away_sp_era_season"]  = df.apply(lambda r: look(r["game_date"], r["away_team"], "sd_era", LEAGUE_ERA), axis=1)
-        df["home_sp_whip_season"] = df.apply(lambda r: look(r["game_date"], r["home_team"], "sd_whip", LEAGUE_WHIP), axis=1)
-        df["away_sp_whip_season"] = df.apply(lambda r: look(r["game_date"], r["away_team"], "sd_whip", LEAGUE_WHIP), axis=1)
-        df["sp_era_diff"]         = df["away_sp_era_season"] - df["home_sp_era_season"]
+        def bp(date, team):
+            return bpmap.get((str(date)[:10], str(team)), LEAGUE_ERA)
 
-        uniq = df["home_sp_era_season"].round(3).nunique()
+        df["home_sp_era_season"]     = df.apply(lambda r: sp(r["game_date"], r["home_team"], "sd_era", LEAGUE_ERA), axis=1)
+        df["away_sp_era_season"]     = df.apply(lambda r: sp(r["game_date"], r["away_team"], "sd_era", LEAGUE_ERA), axis=1)
+        df["home_sp_whip_season"]    = df.apply(lambda r: sp(r["game_date"], r["home_team"], "sd_whip", LEAGUE_WHIP), axis=1)
+        df["away_sp_whip_season"]    = df.apply(lambda r: sp(r["game_date"], r["away_team"], "sd_whip", LEAGUE_WHIP), axis=1)
+        df["home_sp_era_last3"]      = df.apply(lambda r: sp(r["game_date"], r["home_team"], "last3_era", LEAGUE_ERA), axis=1)
+        df["away_sp_era_last3"]      = df.apply(lambda r: sp(r["game_date"], r["away_team"], "last3_era", LEAGUE_ERA), axis=1)
+        df["home_bullpen_era_last7"] = df.apply(lambda r: bp(r["game_date"], r["home_team"]), axis=1)
+        df["away_bullpen_era_last7"] = df.apply(lambda r: bp(r["game_date"], r["away_team"]), axis=1)
+        df["sp_era_diff"]            = df["away_sp_era_season"] - df["home_sp_era_season"]
+
         cov = (df["home_sp_era_season"].round(2) != LEAGUE_ERA).mean() * 100
-        print(f"  Real starter ERA: {uniq} unique values, {cov:.0f}% of games matched a starter "
-              f"(range {df['home_sp_era_season'].min():.2f}-{df['home_sp_era_season'].max():.2f})")
+        print(f"  Starter ERA: {df['home_sp_era_season'].round(3).nunique()} uniq, {cov:.0f}% matched | "
+              f"last3 {df['home_sp_era_last3'].min():.2f}-{df['home_sp_era_last3'].max():.2f} | "
+              f"bullpen {df['home_bullpen_era_last7'].min():.2f}-{df['home_bullpen_era_last7'].max():.2f}")
 
     except Exception as e:
         print(f"  Pitcher features failed: {e} - using league average defaults")
@@ -223,6 +249,10 @@ def add_pitcher_features(df, conn):
         df["away_sp_era_season"]  = 4.20
         df["home_sp_whip_season"] = 1.30
         df["away_sp_whip_season"] = 1.30
+        df["home_sp_era_last3"]   = 4.20
+        df["away_sp_era_last3"]   = 4.20
+        df["home_bullpen_era_last7"] = 4.20
+        df["away_bullpen_era_last7"] = 4.20
         df["sp_era_diff"]         = 0.0
 
     return df

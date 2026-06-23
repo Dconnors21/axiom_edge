@@ -56,13 +56,12 @@ FEATURE_COLS = [
     # Season standing
     "home_season_win_pct", "away_season_win_pct",
 
-    # Starting pitcher (key MLB signal)
-    "home_sp_era_last3",   "away_sp_era_last3",
+    # Starting pitcher (key MLB signal). Real point-in-time starter ERA/WHIP.
+    # NOTE: sp_era_last3 + bullpen_era_last7 are built in mlb_features (and stored
+    # for analysis) but excluded from the model — they added no out-of-sample
+    # signal (test AUC flat, CV down) and would need serve-time plumbing.
     "home_sp_era_season",  "away_sp_era_season",
     "home_sp_whip_season", "away_sp_whip_season",
-
-    # Bullpen
-    "home_bullpen_era_last7", "away_bullpen_era_last7",
 
     # Home/away splits
     "home_win_pct_home",  "away_win_pct_away",
