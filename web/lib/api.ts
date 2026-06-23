@@ -12,10 +12,16 @@ import type {
   EVResponse,
 } from "@/types/api";
 
+// Server components reach the API directly (internal URL); the browser uses a
+// same-origin relative path that Next rewrites to the API. This way one HTTPS
+// tunnel (or deploy) serves the whole app to a phone — no CORS, no localhost
+// leaking to the client.
 const BASE =
-  process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+  typeof window === "undefined"
+    ? process.env.API_INTERNAL ?? "http://localhost:8001"
+    : process.env.NEXT_PUBLIC_API_BASE ?? "";
 
-// Live odds/EV are perishable — never cache them at the data layer.
+// Live odds/EV are perishable: never cache them at the data layer.
 // (PWA addendum enforces the same rule in the service worker.)
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { cache: "no-store" });

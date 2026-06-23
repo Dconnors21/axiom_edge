@@ -1,7 +1,15 @@
 import type { NextConfig } from "next";
 import withSerwistInit from "@serwist/next";
 
-const nextConfig: NextConfig = {};
+const API_INTERNAL = process.env.API_INTERNAL ?? "http://localhost:8001";
+
+const nextConfig: NextConfig = {
+  // Proxy client-side /api/* to the FastAPI service so the browser talks to the
+  // app same-origin. One HTTPS origin (tunnel or deploy) then serves everything.
+  async rewrites() {
+    return [{ source: "/api/:path*", destination: `${API_INTERNAL}/api/:path*` }];
+  },
+};
 
 const withSerwist = withSerwistInit({
   swSrc: "app/sw.ts",

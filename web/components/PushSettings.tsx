@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8001";
+const API = process.env.NEXT_PUBLIC_API_BASE ?? ""; // same-origin via Next /api proxy
 const LEAGUES = ["nba", "mlb", "nhl"] as const;
 
 type Prefs = {
