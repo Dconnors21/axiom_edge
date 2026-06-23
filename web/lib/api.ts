@@ -7,6 +7,7 @@ import type {
   PropsSlate,
   Research,
   ResearchDetail,
+  Ladder,
   EVRequest,
   EVResponse,
 } from "@/types/api";
@@ -24,6 +25,8 @@ async function get<T>(path: string): Promise<T> {
 
 export const getSlate = (league: League) => get<Slate>(`/api/slate/${league}`);
 export const getInsight = () => get<Insight>("/api/insight");
+export const getLadder = (stake = 50, days = 10) =>
+  get<Ladder>(`/api/ladder?stake=${stake}&days=${days}`);
 export const getPerformance = (league: League) =>
   get<Performance>(`/api/performance/${league}`);
 export const getRoi = (league: League) => get<Roi>(`/api/roi/${league}`);

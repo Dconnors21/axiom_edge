@@ -169,6 +169,40 @@ export interface ResearchDetail {
   recent: Record<string, number>;
 }
 
+export interface LadderLeg {
+  league: League;
+  market: string;
+  selection: string;
+  matchup: string;
+  model_prob: number;
+  price: number;
+  decimal: number;
+}
+
+export interface LadderRung {
+  day: number;
+  balance: number;
+}
+
+export interface Ladder {
+  available: boolean;
+  reason: string;
+  slate_date: string | null;
+  legs: LadderLeg[];
+  combined_american: number | null;
+  combined_decimal: number | null;
+  combined_model_prob: number | null;
+  break_even_prob: number | null;
+  ev_per_unit: number | null;
+  edge: number | null;
+  stake: number;
+  payout: number | null;
+  target_days: number;
+  projection: LadderRung[];
+  survival_7: number | null;
+  survival_10: number | null;
+}
+
 export interface EVRequest {
   prob: number;
   american_price: number;

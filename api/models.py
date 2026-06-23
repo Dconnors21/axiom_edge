@@ -179,6 +179,40 @@ class ResearchDetail(BaseModel):
     recent: dict[str, float]           # last-3 average, for a hot/cold read
 
 
+class LadderLeg(BaseModel):
+    league: League
+    market: str          # "Moneyline" / "Strikeouts"
+    selection: str       # team or "Player u5.5 K"
+    matchup: str
+    model_prob: float
+    price: int           # American
+    decimal: float
+
+
+class LadderRung(BaseModel):
+    day: int
+    balance: float       # bankroll after winning this rung (let it ride)
+
+
+class Ladder(BaseModel):
+    available: bool
+    reason: str = ""
+    slate_date: Optional[str] = None
+    legs: list[LadderLeg] = []
+    combined_american: Optional[int] = None
+    combined_decimal: Optional[float] = None
+    combined_model_prob: Optional[float] = None   # joint, assuming independence
+    break_even_prob: Optional[float] = None       # 1 / combined_decimal
+    ev_per_unit: Optional[float] = None
+    edge: Optional[float] = None                   # model prob - break-even
+    stake: float = 50.0
+    payout: Optional[float] = None                 # stake * combined_decimal
+    target_days: int = 10
+    projection: list[LadderRung] = []
+    survival_7: Optional[float] = None             # P(win 7 straight), %
+    survival_10: Optional[float] = None
+
+
 class EVRequest(BaseModel):
     prob: float
     american_price: int

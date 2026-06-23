@@ -9,6 +9,8 @@ export const signedPct = (x: number, dp = 1) =>
 export const odds = (n: number | null | undefined) =>
   n == null ? "—" : n > 0 ? `+${n}` : `${n}`;
 
+export const money = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
+
 export const signed = (x: number, dp = 2) =>
   `${x >= 0 ? "+" : ""}${x.toFixed(dp)}`;
 

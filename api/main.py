@@ -10,10 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from .db import LEAGUES, connect, latest_slate_date, fetch_slate
 from .ev import american_to_decimal, american_to_implied, ev_per_unit, kelly_fraction
 from . import metrics
+from .ladder import build_ladder
 from .models import (
     Side, Game, Slate, Insight, Performance, CalibrationBucket, RocPoint,
     Roi, BetRow, EquityPoint, PropRow, PropsSlate, ResearchPlayer, Research,
-    ResearchGame, ResearchDetail, EVRequest, EVResponse,
+    ResearchGame, ResearchDetail, Ladder, EVRequest, EVResponse,
 )
 
 app = FastAPI(title="AXIOM Edge API", version="0.1.0")
@@ -486,6 +487,11 @@ def research_player(league: str, name: str, window: int = 10) -> ResearchDetail:
         team=str(rows[0][cfg["team_col"]] or ""), stat_keys=cfg["keys"],
         games=games, averages=averages, recent=recent,
     )
+
+
+@app.get("/api/ladder", response_model=Ladder)
+def ladder(stake: float = 50.0, days: int = 10) -> Ladder:
+    return build_ladder(stake=stake, target_days=days)
 
 
 @app.post("/api/ev", response_model=EVResponse)

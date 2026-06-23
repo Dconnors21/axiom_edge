@@ -1,8 +1,16 @@
-import type { League, Slate, Performance } from "@/types/api";
-import { getSlate, getInsight, getPerformance } from "@/lib/api";
+import type { League, Slate, Performance, Ladder } from "@/types/api";
+import { getSlate, getInsight, getPerformance, getLadder } from "@/lib/api";
 import { slateDateLong, pct, signedPct } from "@/lib/format";
 import AxiomRead from "@/components/AxiomRead";
+import LadderChallenge from "@/components/LadderChallenge";
 import TopEdges from "@/components/TopEdges";
+
+const LADDER_FALLBACK: Ladder = {
+  available: false, reason: "Ladder unavailable right now.", slate_date: null,
+  legs: [], combined_american: null, combined_decimal: null, combined_model_prob: null,
+  break_even_prob: null, ev_per_unit: null, edge: null, stake: 50, payout: null,
+  target_days: 10, projection: [], survival_7: null, survival_10: null,
+};
 
 export const dynamic = "force-dynamic"; // live odds — never statically cached
 
@@ -76,9 +84,10 @@ function PerfGlance({ perf }: { perf: Performance }) {
 }
 
 export default async function Overview() {
-  const [slates, insight, perfResults] = await Promise.all([
+  const [slates, insight, ladder, perfResults] = await Promise.all([
     settledSlates(),
     getInsight(),
+    getLadder().catch(() => LADDER_FALLBACK),
     Promise.allSettled([getPerformance("nba"), getPerformance("mlb")]),
   ]);
 
@@ -108,6 +117,8 @@ export default async function Overview() {
 
       <div className="mt-8 flex flex-col gap-10">
         <AxiomRead insight={insight} />
+
+        <LadderChallenge ladder={ladder} />
 
         <TopEdges slates={slates} />
 
