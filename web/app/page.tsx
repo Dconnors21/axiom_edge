@@ -1,9 +1,11 @@
-import type { League, Slate, Performance, Ladder } from "@/types/api";
+import type { League, Slate, Performance, Ladder, Insight } from "@/types/api";
 import { getSlate, getInsight, getPerformance, getLadder } from "@/lib/api";
 import { slateDateLong, pct, signedPct } from "@/lib/format";
 import AxiomRead from "@/components/AxiomRead";
 import LadderChallenge from "@/components/LadderChallenge";
 import TopEdges from "@/components/TopEdges";
+
+const INSIGHT_FALLBACK: Insight = { available: false, market: "moneyline", line_movement: "" };
 
 const LADDER_FALLBACK: Ladder = {
   available: false, reason: "Ladder unavailable right now.", slate_date: null,
@@ -86,7 +88,7 @@ function PerfGlance({ perf }: { perf: Performance }) {
 export default async function Overview() {
   const [slates, insight, ladder, perfResults] = await Promise.all([
     settledSlates(),
-    getInsight(),
+    getInsight().catch(() => INSIGHT_FALLBACK),
     getLadder().catch(() => LADDER_FALLBACK),
     Promise.allSettled([getPerformance("nba"), getPerformance("mlb")]),
   ]);
